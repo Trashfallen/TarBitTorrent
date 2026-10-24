@@ -271,7 +271,8 @@ function rowCells(t) {
   const [label, icon] = STATUS[t.status] || [t.status, "info"];
   const st = `s-${t.status}`;
   const pulse = t.status === "searching" || t.status === "metadata" ? " searching-pulse" : "";
-  const statusText = t.status === "error" ? (t.error || label) : label;
+  const statusText = t.status === "error" ? (t.error || label)
+    : t.status === "checking" && t.check_progress > 0 ? `${label} ${Math.floor(t.check_progress * 100)}%` : label;
   return {
     name: `<div class="cell-name ${st}"><div class="st-ico${pulse}">${ico(icon)}</div><span title="${esc(t.name)}">${esc(t.name)}</span></div>`,
     size: t.has_metadata ? fmtSize(t.size) : "-",
@@ -710,13 +711,22 @@ function renderPeers(pane, peers) {
     setHTML(pane, `<div class="muted">Пока нет соединений. Программа продолжает искать пиров через трекеры, DHT, PEX и локальную сеть.</div>`);
     return;
   }
-  setHTML(pane, `<table><colgroup><col style="width:190px"><col><col style="width:120px"><col style="width:95px"><col style="width:95px"><col style="width:95px"><col style="width:180px"></colgroup>
-    <thead><tr><th>Адрес</th><th>Клиент</th><th>Прогресс</th><th class="num">Загрузка</th><th class="num">Отдача</th><th class="num">Скачано</th><th>Откуда</th></tr></thead>
+  setHTML(pane, `<table><colgroup><col style="width:190px"><col><col style="width:120px"><col style="width:150px"><col style="width:95px"><col style="width:95px"><col style="width:95px"><col style="width:150px"></colgroup>
+    <thead><tr><th>Адрес</th><th>Клиент</th><th>Прогресс</th><th title="Отдает ли пир нам: заглушка (choke) - решение его клиента">Нам отдает</th><th class="num">Загрузка</th><th class="num">Отдача</th><th class="num">Скачано</th><th>Откуда</th></tr></thead>
     <tbody>${peers.map((p) => `<tr><td class="mono sel-text">${esc(p.ip.includes(":") ? `[${p.ip}]` : p.ip)}:${p.port}${p.encrypted ? " 🔒" : ""}</td>
       <td title="${esc(p.client)}">${p.seed ? '<span class="chip ok">сид</span>' : ""}${esc(p.client || "?")}</td>
       <td><div class="progress ${p.seed ? "s-seeding" : "s-downloading"}"><i style="width:${(p.progress * 100).toFixed(1)}%"></i><span>${pct(p.progress)}</span></div></td>
+      <td>${peerExchange(p)}</td>
       <td class="num">${fmtSpeed(p.dl)}</td><td class="num">${fmtSpeed(p.ul)}</td><td class="num">${fmtSize(p.downloaded)}</td>
       <td>${p.sources.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</td></tr>`).join("")}</tbody></table>`);
+}
+
+// отдает ли пир нам: «заглушил» - его клиент пока не дает нам слот
+function peerExchange(p) {
+  if (p.they_choke === undefined) return "";
+  if (!p.they_choke) return `<span class="chip ok" title="Пир дал нам слот">отдает</span>`;
+  if (!p.we_interested) return `<span class="chip" title="У пира нет нужных нам кусков">не нужен</span>`;
+  return `<span class="chip warn" title="Клиент пира держит нас на заглушке (choke): слоты отдачи заняты другими">заглушил</span>`;
 }
 
 const TR_STATUS = { working: ["работает", "ok"], updating: ["опрашиваю", "warn"], error: ["ошибка", "err"], idle: ["ждет", ""], disabled: ["выключено", ""] };

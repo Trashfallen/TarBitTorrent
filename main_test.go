@@ -127,3 +127,16 @@ func TestCreateShortcut(t *testing.T) {
 		t.Fatalf("shortcut not written: %v", err)
 	}
 }
+
+func TestParsePeerFlags(t *testing.T) {
+	report := "Solasta II\nInfohash: 48941f673a9fe38ccbde8fb99e30cdb7f2539f88\n2 peer conns:\n" +
+		"- 0.0.0.0:53975-203.0.113.9:51103\n  peer id: \"-UT360W-\"\n  extensions: 0\n  ltep extensions: map[]\n  pex: 0 conns\n" +
+		"  reqq: 0+0/(1/255):0/1024, flags: i:Hg,U,v1:c\n" +
+		"- 0.0.0.0:53975-[2001:db8::1]:24797\n  reqq: 0+3/(1/255):0/1024, flags: ic:M,U,v1:\n" +
+		"Other\nInfohash: dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c\n- 0.0.0.0:1-192.0.2.1:2\n  reqq: flags: :I:ic\n"
+	got := parsePeerFlags(report, "48941f673a9fe38ccbde8fb99e30cdb7f2539f88")
+	want := map[string]string{"203.0.113.9:51103": "i:Hg,U,v1:c", "[2001:db8::1]:24797": "ic:M,U,v1:"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v", got)
+	}
+}

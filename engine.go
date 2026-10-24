@@ -99,6 +99,8 @@ type Item struct {
 	filesDone    []int64
 	verifyCancel context.CancelFunc // идет проверка файлов: отменить перед Drop
 	verifyDone   chan struct{}
+	checkDone    int // проверено кусков (для процента проверки)
+	checkTotal   int
 }
 
 type huntState struct {
@@ -632,9 +634,24 @@ func (e *Engine) verifyLocked(it *Item, t *torrent.Torrent) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	it.verifyCancel, it.verifyDone = cancel, done
+	n := t.NumPieces()
+	it.checkDone, it.checkTotal = 0, n
 	go func() {
 		defer close(done)
-		err := t.VerifyDataContext(ctx)
+		// по кускам, а не VerifyData целиком: так виден процент проверки
+		var err error
+		for i := 0; i < n && err == nil; i++ {
+			if err = t.Piece(i).VerifyDataContext(ctx); err != nil {
+				err = fmt.Errorf("кусок %d: %w", i, err)
+			}
+			if i%8 == 7 || i == n-1 {
+				e.mu.Lock()
+				if it.verifyDone == done {
+					it.checkDone = i + 1
+				}
+				e.mu.Unlock()
+			}
+		}
 		e.mu.Lock()
 		defer e.mu.Unlock()
 		if it.verifyDone == done {
@@ -1194,8 +1211,12 @@ func (e *Engine) tick() {
 				}
 			}
 		}
-		if wanted, done, ok := e.wantedLocked(it); ok && !it.checking {
+		wanted, done, ok := e.wantedLocked(it)
+		if ok {
+			// во время проверки прогресс растет по мере проверенных кусков
 			it.Size, it.Done = wanted, done
+		}
+		if ok && !it.checking {
 			if it.Finished && done < wanted {
 				// проверка нашла битые куски или выбраны новые файлы: докачиваем
 				it.Finished = false
@@ -1316,6 +1337,39 @@ func (e *Engine) huntNowLocked(it *Item) {
 			e.addTrackersLocked(it, e.extraTrackers(), true)
 		}
 	}
+}
+
+// peerFlags - состояние обмена с каждым пиром раздачи из отчета движка (сами флаги
+// движок наружу не отдает): ключ - адрес пира, значение - флаги вида "ic:Hg,U,v1:c"
+// (наши : соединение : пира; i - заинтересован, c - держит на заглушке).
+func (e *Engine) peerFlags(ih string) map[string]string {
+	return parsePeerFlags(e.statusText(), ih)
+}
+
+func parsePeerFlags(text, ih string) map[string]string {
+	out := map[string]string{}
+	section := false
+	addr := ""
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "Infohash: ") {
+			section = strings.TrimSpace(strings.TrimPrefix(line, "Infohash: ")) == ih
+			continue
+		}
+		if !section {
+			continue
+		}
+		if strings.HasPrefix(line, "- ") {
+			if _, remote, ok := strings.Cut(line[2:], "-"); ok {
+				addr = strings.TrimSpace(remote)
+			}
+			continue
+		}
+		if addr != "" && strings.Contains(line, "flags: ") {
+			out[addr] = strings.TrimSpace(line[strings.Index(line, "flags: ")+7:])
+			addr = ""
+		}
+	}
+	return out
 }
 
 // statusText - подробный отчет движка (пиры, их флаги choke/interested, куски) для отладки.

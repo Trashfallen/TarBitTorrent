@@ -86,8 +86,13 @@ func (e *Engine) summaryLocked(it *Item) M {
 		ratio = float64(uploaded) / float64(d)
 	}
 	seedsTotal, peersTotal := e.swarmLocked(it)
+	checkProgress := 0.0
+	if it.checking && it.checkTotal > 0 {
+		checkProgress = float64(it.checkDone) / float64(it.checkTotal)
+	}
 	m := M{
-		"id": it.ID, "name": it.Name, "size": it.Size, "done": it.Done, "progress": progress,
+		"check_progress": checkProgress,
+		"id":             it.ID, "name": it.Name, "size": it.Size, "done": it.Done, "progress": progress,
 		"status": e.statusLocked(it, st), "dl": it.dl, "ul": it.ul,
 		"seeds": 0, "peers": 0, "seeds_total": seedsTotal, "peers_total": peersTotal, "candidates": 0,
 		"eta": eta, "ratio": ratio, "uploaded": uploaded, "downloaded": downloaded,
@@ -279,6 +284,7 @@ func (e *Engine) Peers(id string) ([]M, error) {
 		return out, nil
 	}
 	n := t.NumPieces()
+	flags := e.peerFlags(id)
 	for _, pc := range t.PeerConns() {
 		host, port, _ := net.SplitHostPort(pc.RemoteAddr.String())
 		host = strings.TrimPrefix(host, "::ffff:")
@@ -300,6 +306,16 @@ func (e *Engine) Peers(id string) ([]M, error) {
 			"seed": n > 0 && st.RemotePieceCount >= n, "encrypted": false,
 			"incoming": pc.Discovery == torrent.PeerSourceIncoming, "sources": []string{src},
 		})
+		if f, ok := flags[pc.RemoteAddr.String()]; ok {
+			parts := strings.SplitN(f, ":", 3)
+			if len(parts) == 3 {
+				m := out[len(out)-1]
+				m["we_interested"] = strings.Contains(parts[0], "i")
+				m["we_choke"] = strings.Contains(parts[0], "c")
+				m["they_interested"] = strings.Contains(parts[2], "i")
+				m["they_choke"] = strings.Contains(parts[2], "c")
+			}
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a := out[i]["dl"].(float64) + out[i]["ul"].(float64)

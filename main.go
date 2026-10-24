@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -60,7 +61,30 @@ type App struct {
 	trayReady atomic.Bool
 }
 
+// Движок по умолчанию отображает файлы раздач в память (mmap) и не отпускает их до
+// выхода из программы: удалить или перенести файлы удаленной раздачи нельзя, память
+// растет. Обычный режим включается только переменной окружения до старта, поэтому
+// без нее программа перезапускает себя с ней (доли секунды, незаметно).
+const fileIOEnv = "TORRENT_STORAGE_DEFAULT_FILE_IO"
+
+func reexecWithClassicIO() bool {
+	if os.Getenv(fileIOEnv) == "classic" {
+		return false
+	}
+	os.Setenv(fileIOEnv, "classic")
+	exe := exePath()
+	if exe == "" {
+		return false
+	}
+	cmd := exec.Command(exe, os.Args[1:]...)
+	cmd.Env = os.Environ()
+	return cmd.Start() == nil
+}
+
 func main() {
+	if reexecWithClassicIO() {
+		return
+	}
 	minimized := flag.Bool("minimized", false, "запуститься в трее без окна")
 	afterUpdate := flag.Int("after-update", 0, "PID старой копии после обновления")
 	flag.Parse()
