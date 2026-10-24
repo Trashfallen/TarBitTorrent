@@ -206,7 +206,8 @@ svg.spin { animation: spin 1s linear infinite; }
 .tab.active { background: var(--panel); color: var(--text); border-color: var(--line); font-weight: 600; }
 .pane { overflow: auto; padding: 14px 16px; min-height: 0; }
 .pane table td { height: 30px; }
-.pane table thead th { background: var(--panel); }
+/* шапка прилипает к самому верху панели, а не ниже ее отступа: иначе в щель видны строки */
+.pane table thead th { background: var(--panel); top: -14px; box-shadow: 0 1px 0 var(--line); }
 .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 26px; margin-top: 14px; }
 .kv div { display: flex; gap: 10px; justify-content: space-between; border-bottom: 1px dashed var(--line); padding: 4px 0; }
 .kv span { color: var(--text-3); white-space: nowrap; }
