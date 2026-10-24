@@ -37,6 +37,7 @@ var configDefaults = map[string]any{
 	"ask_on_add":           true,     //
 	"start_paused":         false,    //
 	"sequential_default":   false,    //
+	"create_folder":        true,     // класть раздачу в свою папку (имя - название раздачи)
 	"seed_ratio_limit":     0.0,      // 0 - раздавать без ограничений
 	"notify_finished":      true,     //
 	"close_to_tray":        true,     // крестик прячет окно в трей
@@ -89,10 +90,10 @@ func (c *Config) get(k string) any {
 	return c.data[k]
 }
 
-func (c *Config) Bool(k string) bool      { v, _ := c.get(k).(bool); return v }
-func (c *Config) Float(k string) float64  { v, _ := c.get(k).(float64); return v }
-func (c *Config) Int(k string) int        { return int(c.Float(k)) }
-func (c *Config) Str(k string) string     { v, _ := c.get(k).(string); return v }
+func (c *Config) Bool(k string) bool     { v, _ := c.get(k).(bool); return v }
+func (c *Config) Float(k string) float64 { v, _ := c.get(k).(float64); return v }
+func (c *Config) Int(k string) int       { return int(c.Float(k)) }
+func (c *Config) Str(k string) string    { v, _ := c.get(k).(string); return v }
 
 func (c *Config) SavePath() string {
 	if p := c.Str("save_path"); p != "" {

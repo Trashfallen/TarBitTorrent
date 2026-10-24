@@ -5,6 +5,7 @@ package main
 import (
 	"math"
 	"net"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -137,6 +138,7 @@ func (e *Engine) Details(id string) (M, error) {
 	m["hunt"] = it.hunt
 	m["history"] = it.history
 	m["magnet"] = it.Magnet
+	m["folder"] = folderFor(it.Folder, e.itemInfo(it))
 	m["pieces"], m["piece_count"], m["piece_size"] = 0, 0, 0
 	m["connections"], m["wasted"] = 0, 0
 	m["comment"], m["creator"], m["created"] = "", "", 0
@@ -225,6 +227,7 @@ func (e *Engine) Files(id string) ([]M, error) {
 	if info == nil {
 		return out, nil
 	}
+	folder := folderFor(it.Folder, info)
 	for i, f := range infoFiles(info) {
 		if f.pad {
 			continue
@@ -243,7 +246,8 @@ func (e *Engine) Files(id string) ([]M, error) {
 		if f.size > 0 {
 			progress = float64(done) / float64(f.size)
 		}
-		out = append(out, M{"index": i, "path": f.path, "size": f.size, "done": done, "progress": progress, "priority": p})
+		out = append(out, M{"index": i, "path": filepath.Join(folder, f.path), "size": f.size, "done": done,
+			"progress": progress, "priority": p, "abs": filepath.Join(it.SavePath, folder, f.path)})
 	}
 	return out, nil
 }

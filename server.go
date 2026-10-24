@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,10 +57,10 @@ func newServer(app *App) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) Port() int     { return s.ln.Addr().(*net.TCPAddr).Port }
-func (s *Server) URL() string   { return "http://127.0.0.1:" + strconv.Itoa(s.Port()) + "/#t=" + s.token }
-func (s *Server) Start()        { go s.srv.Serve(s.ln) }
-func (s *Server) Stop()         { _ = s.srv.Close() }
+func (s *Server) Port() int   { return s.ln.Addr().(*net.TCPAddr).Port }
+func (s *Server) URL() string { return "http://127.0.0.1:" + strconv.Itoa(s.Port()) + "/#t=" + s.token }
+func (s *Server) Start()      { go s.srv.Serve(s.ln) }
+func (s *Server) Stop()       { _ = s.srv.Close() }
 
 // Prepare разбирает раздачу: в окно подтверждения или сразу в загрузки.
 func (s *Server) Prepare(magnet string, data []byte, forceDialog bool) (M, error) {
@@ -170,8 +171,14 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func str(m M, k string) string     { v, _ := m[k].(string); return v }
-func boolPtr(m M, k string) *bool { v, ok := m[k].(bool); if !ok { return nil }; return &v }
+func str(m M, k string) string { v, _ := m[k].(string); return v }
+func boolPtr(m M, k string) *bool {
+	v, ok := m[k].(bool)
+	if !ok {
+		return nil
+	}
+	return &v
+}
 
 func intMap(v any) map[int]int {
 	out := map[int]int{}
@@ -209,6 +216,10 @@ func (s *Server) route(method string, parts []string, body M) (any, error) {
 			return app.cfg.Snapshot(), nil
 		case "speedtest":
 			return app.speed.State(), nil
+		case "debug":
+			// стеки всех горутин: для разбора зависаний
+			buf := make([]byte, 8<<20)
+			return M{"goroutines": string(buf[:runtime.Stack(buf, true)]), "engine": eng.statusText()}, nil
 		case "torrent":
 			switch arg(2) {
 			case "files":
@@ -250,8 +261,18 @@ func (s *Server) route(method string, parts []string, body M) (any, error) {
 		if arg(2) == "cancel" {
 			return nil, nil
 		}
+		var folder *string
+		if mk, ok := body["create_folder"].(bool); ok {
+			f := ""
+			if mk {
+				if f = strings.TrimSpace(str(body, "folder")); f == "" {
+					f = p.Name
+				}
+			}
+			folder = &f
+		}
 		return eng.Add(p.src, AddOptions{SavePath: str(body, "save_path"), Paused: boolPtr(body, "paused"),
-			Sequential: boolPtr(body, "sequential"), Prio: intMap(body["priorities"])})
+			Sequential: boolPtr(body, "sequential"), Prio: intMap(body["priorities"]), Folder: folder})
 	case "torrent":
 		id := arg(1)
 		switch arg(2) {

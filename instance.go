@@ -8,10 +8,14 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -25,9 +29,11 @@ type instanceInfo struct {
 
 var instanceMutex windows.Handle
 
-// acquireInstance: true - мы первая копия.
-func acquireInstance() bool {
-	name, _ := windows.UTF16PtrFromString(`Local\` + appName)
+// acquireInstance: true - мы первая копия. Замок привязан к папке данных: копии
+// с разными данными (TARBIT_HOME для отладки) друг другу не мешают.
+func acquireInstance(p Paths) bool {
+	sum := sha1.Sum([]byte(strings.ToLower(filepath.Clean(p.Data))))
+	name, _ := windows.UTF16PtrFromString(`Local\` + appName + "-" + hex.EncodeToString(sum[:8]))
 	h, err := windows.CreateMutex(nil, false, name)
 	instanceMutex = h
 	return err != windows.ERROR_ALREADY_EXISTS

@@ -17,6 +17,7 @@ package main
 // соединений; прогресс хранится в базе проверенных кусков и не теряется.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -77,7 +78,11 @@ type Item struct {
 	UserTrackers []string    `json:"user_trackers,omitempty"`
 	ActiveSecs   int64       `json:"active_secs,omitempty"`
 	NeedCheck    bool        `json:"need_check,omitempty"` // проверить файлы на диске при первом запуске
-	SeedSecs     int64       `json:"seed_secs,omitempty"`
+	// Folder - папка раздачи внутри SavePath; "" - файлы прямо в SavePath.
+	// nil - раздача добавлена до появления этой настройки: как раньше раскладывал
+	// движок (папка с названием для многофайловых, без папки для одиночного файла).
+	Folder   *string `json:"folder,omitempty"`
+	SeedSecs int64   `json:"seed_secs,omitempty"`
 
 	t            *torrent.Torrent
 	trackers     []*trState
@@ -92,12 +97,14 @@ type Item struct {
 	err          string
 	everIncoming bool
 	filesDone    []int64
+	verifyCancel context.CancelFunc // идет проверка файлов: отменить перед Drop
+	verifyDone   chan struct{}
 }
 
 type huntState struct {
-	Active    bool  `json:"active"`
-	Step      int   `json:"step"`
-	Announces int   `json:"announces"`
+	Active    bool `json:"active"`
+	Step      int  `json:"step"`
+	Announces int  `json:"announces"`
 	last      time.Time
 	sinceData time.Time
 }
@@ -124,8 +131,8 @@ type Engine struct {
 
 	dhtNodes  int
 	incoming  bool
-	throttled atomic.Bool // на время замера скорости
-	sem      chan struct{} // одновременные запросы к трекерам
+	throttled atomic.Bool   // на время замера скорости
+	sem       chan struct{} // одновременные запросы к трекерам
 }
 
 func newEngine(cfg *Config, paths Paths, notify func(string, string)) (*Engine, error) {
@@ -221,6 +228,51 @@ func (e *Engine) startClient() error {
 
 func (e *Engine) storageFor(dir string) storage.ClientImpl {
 	return storage.NewFileOpts(storage.NewFileClientOpts{ClientBaseDir: dir, PieceCompletion: e.pc})
+}
+
+// itemStorage раскладывает файлы раздачи по ее папке (Folder).
+func (e *Engine) itemStorage(it *Item) storage.ClientImpl {
+	folder := it.Folder
+	return storage.NewFileOpts(storage.NewFileClientOpts{
+		ClientBaseDir:   it.SavePath,
+		PieceCompletion: e.pc,
+		FilePathMaker: func(o storage.FilePathMakerOpts) string {
+			return filepath.Join(folderFor(folder, o.Info), relFilePath(o.Info, o.File))
+		},
+	})
+}
+
+// relFilePath - путь файла внутри раздачи, без ее корневой папки.
+func relFilePath(info *metainfo.Info, f *metainfo.FileInfo) string {
+	if p := f.BestPath(); len(p) > 0 {
+		return filepath.Join(p...)
+	}
+	return info.BestName() // раздача из одного файла
+}
+
+func folderFor(folder *string, info *metainfo.Info) string {
+	if folder != nil {
+		return *folder
+	}
+	if info != nil && info.IsDir() {
+		return info.BestName()
+	}
+	return ""
+}
+
+// sanitizeFolder убирает из имени папки то, что Windows не разрешает.
+func sanitizeFolder(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if r < 32 || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return '_'
+		}
+		return r
+	}, name)
+	name = strings.TrimRight(strings.TrimSpace(name), ". ")
+	if name == "." || name == ".." {
+		return ""
+	}
+	return name
 }
 
 // restart пересоздает движок после смены порта, шифрования и т.п.
@@ -378,14 +430,11 @@ type infoFile struct {
 	pad  bool
 }
 
+// infoFiles - файлы раздачи; path - внутри раздачи, без ее корневой папки.
 func infoFiles(info *metainfo.Info) []infoFile {
 	var out []infoFile
 	for _, f := range info.UpvertedFiles() {
-		path := info.BestName()
-		if info.IsDir() {
-			path = filepath.Join(append([]string{info.BestName()}, f.BestPath()...)...)
-		}
-		out = append(out, infoFile{path: path, size: f.Length, pad: strings.Contains(f.Attr, "p")})
+		out = append(out, infoFile{path: relFilePath(info, &f), size: f.Length, pad: strings.Contains(f.Attr, "p")})
 	}
 	return out
 }
@@ -401,6 +450,7 @@ type AddOptions struct {
 	Paused     *bool
 	Sequential *bool
 	Prio       map[int]int
+	Folder     *string // nil - по настройке create_folder
 }
 
 func (e *Engine) Has(id string) bool {
@@ -459,6 +509,18 @@ func (e *Engine) Add(src *source, o AddOptions) (AddResult, error) {
 	if it.Name == "" {
 		it.Name = id
 	}
+	switch {
+	case o.Folder != nil:
+		f := sanitizeFolder(*o.Folder)
+		it.Folder = &f
+	case !e.cfg.Bool("create_folder"):
+		f := ""
+		it.Folder = &f
+	case src.name != "":
+		f := sanitizeFolder(src.name)
+		it.Folder = &f
+	}
+	// magnet без названия при create_folder: решится по метаданным (как раньше)
 	if src.info != nil {
 		it.HasMeta = true
 		it.Private = src.info.Private != nil && *src.info.Private
@@ -491,7 +553,9 @@ func wantedSize(info *metainfo.Info, prio map[int]int) int64 {
 
 // ---------- активация ----------
 
-func (e *Engine) metainfoPath(id string) string { return filepath.Join(e.paths.Torrents, id+".torrent") }
+func (e *Engine) metainfoPath(id string) string {
+	return filepath.Join(e.paths.Torrents, id+".torrent")
+}
 
 func (e *Engine) activateLocked(it *Item) error {
 	var spec *torrent.TorrentSpec
@@ -508,7 +572,7 @@ func (e *Engine) activateLocked(it *Item) error {
 	} else {
 		return errors.New("нет ни .torrent, ни magnet-ссылки")
 	}
-	spec.Storage = e.storageFor(it.SavePath)
+	spec.Storage = e.itemStorage(it)
 	t, _, err := e.cl.AddTorrentSpec(spec)
 	if err != nil {
 		return err
@@ -565,17 +629,26 @@ func (e *Engine) afterInfo(it *Item, t *torrent.Torrent) {
 func (e *Engine) verifyLocked(it *Item, t *torrent.Torrent) {
 	it.checking = true
 	t.DisallowDataUpload()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	it.verifyCancel, it.verifyDone = cancel, done
 	go func() {
-		err := t.VerifyData()
+		defer close(done)
+		err := t.VerifyDataContext(ctx)
 		e.mu.Lock()
 		defer e.mu.Unlock()
-		it.checking = false
-		t.AllowDataUpload()
+		if it.verifyDone == done {
+			it.verifyCancel, it.verifyDone = nil, nil
+		}
 		if it.t != t {
 			return
 		}
+		it.checking = false
+		t.AllowDataUpload()
 		if err != nil {
-			it.err = "проверка: " + err.Error()
+			if ctx.Err() == nil {
+				it.err = "проверка: " + err.Error()
+			}
 			return
 		}
 		it.NeedCheck = false
@@ -624,7 +697,36 @@ func (e *Engine) deactivateLocked(it *Item, announceStop bool) {
 	it.dl, it.ul = 0, 0
 	it.hunt.Active = false
 	e.dirty = true
-	go t.Drop()
+	go dropTorrent(t, e.takeVerifyLocked(it))
+}
+
+// takeVerifyLocked забирает у раздачи идущую проверку файлов (чтобы отменить).
+func (e *Engine) takeVerifyLocked(it *Item) (stop func()) {
+	cancel, done := it.verifyCancel, it.verifyDone
+	it.verifyCancel, it.verifyDone, it.checking = nil, nil, false
+	return func() {
+		if cancel == nil {
+			return
+		}
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			logf("Проверка файлов не остановилась за 10 с")
+		}
+	}
+}
+
+// dropTorrent убирает раздачу из движка. Сначала останавливает ее проверку файлов:
+// Drop посреди проверки может намертво заблокировать движок.
+func dropTorrent(t *torrent.Torrent, stopVerify func()) {
+	stopVerify()
+	t.Drop()
+	select {
+	case <-t.Closed():
+	case <-time.After(15 * time.Second):
+		logf("Раздача %s не закрылась за 15 с", t.InfoHash().HexString())
+	}
 }
 
 func knownPeers(t *torrent.Torrent) []string {
@@ -792,17 +894,56 @@ func (e *Engine) Action(id, act string, body map[string]any) error {
 	return nil
 }
 
-func (e *Engine) rootPath(it *Item) string {
-	name := it.Name
+func (e *Engine) itemInfo(it *Item) *metainfo.Info {
+	if it.t != nil && it.t.Info() != nil {
+		return it.t.Info()
+	}
 	if mi, err := metainfo.LoadFromFile(e.metainfoPath(it.ID)); err == nil {
 		if info, err := mi.UnmarshalInfo(); err == nil {
-			name = info.BestName()
+			return &info
 		}
 	}
-	if name == "" || name == it.ID && !it.HasMeta {
+	return nil
+}
+
+// rootPath - то, что занимает раздача в SavePath: ее папка или единственный файл.
+// "" - файлы лежат прямо в SavePath (без папки), удалять и переносить их по одному.
+func (e *Engine) rootPath(it *Item) string {
+	info := e.itemInfo(it)
+	if info == nil {
 		return ""
 	}
-	return filepath.Join(it.SavePath, name)
+	if f := folderFor(it.Folder, info); f != "" {
+		return filepath.Join(it.SavePath, f)
+	}
+	if !info.IsDir() {
+		return filepath.Join(it.SavePath, info.BestName())
+	}
+	return ""
+}
+
+// filePaths - полные пути всех файлов раздачи (по индексам файлов, включая pad).
+func (e *Engine) filePaths(it *Item) []string {
+	info := e.itemInfo(it)
+	if info == nil {
+		return nil
+	}
+	folder := folderFor(it.Folder, info)
+	var out []string
+	for _, f := range info.UpvertedFiles() {
+		out = append(out, filepath.Join(it.SavePath, folder, relFilePath(info, &f)))
+	}
+	return out
+}
+
+// removeEmptyDirs убирает опустевшие папки от dir вверх до stop (не включая).
+func removeEmptyDirs(dir, stop string) {
+	for dir != stop && len(dir) > len(stop) {
+		if os.Remove(dir) != nil {
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
 }
 
 func (e *Engine) remove(id string, withData bool) error {
@@ -816,14 +957,23 @@ func (e *Engine) remove(id string, withData bool) error {
 	if t != nil {
 		e.announceStoppedLocked(it)
 	}
+	stopVerify := e.takeVerifyLocked(it)
 	it.t = nil
 	delete(e.items, id)
 	e.dirty = true
-	e.mu.Unlock()
 	root := e.rootPath(it)
+	files := e.filePaths(it)
+	e.mu.Unlock()
 	if t != nil {
-		t.Drop()
-		<-t.Closed()
+		dropTorrent(t, stopVerify)
+	}
+	if withData && root == "" {
+		// раздача без своей папки: удаляем только ее файлы
+		for _, f := range files {
+			_ = os.Remove(f)
+			_ = os.Remove(f + ".part")
+			removeEmptyDirs(filepath.Dir(f), it.SavePath)
+		}
 	}
 	if withData && root != "" {
 		// файлы могут быть еще открыты движком: даем ему секунду
@@ -855,12 +1005,35 @@ func (e *Engine) move(it *Item, dest string) error {
 		e.deactivateLocked(it, true)
 	}
 	e.mu.Unlock()
+	e.mu.Lock()
+	root, files, src := e.rootPath(it), e.filePaths(it), it.SavePath
+	e.mu.Unlock()
 	go func() {
-		root := e.rootPath(it)
 		err := os.MkdirAll(dest, 0o755)
-		if err == nil && root != "" && fileExists(root) {
-			time.Sleep(time.Second) // движок закрывает файлы
+		time.Sleep(time.Second) // движок закрывает файлы
+		switch {
+		case err != nil:
+		case root != "" && fileExists(root):
 			err = moveTree(root, filepath.Join(dest, filepath.Base(root)))
+		case root != "":
+			if fileExists(root + ".part") {
+				err = moveTree(root+".part", filepath.Join(dest, filepath.Base(root)+".part"))
+			}
+		default:
+			for _, f := range files {
+				rel, rerr := filepath.Rel(src, f)
+				if rerr != nil {
+					continue
+				}
+				for _, p := range []string{f, f + ".part"} {
+					if fileExists(p) {
+						if err = moveTree(p, filepath.Join(dest, rel)+strings.TrimPrefix(p, f)); err != nil {
+							break
+						}
+					}
+				}
+				removeEmptyDirs(filepath.Dir(f), src)
+			}
 		}
 		e.mu.Lock()
 		it.moving = false
@@ -1143,6 +1316,16 @@ func (e *Engine) huntNowLocked(it *Item) {
 			e.addTrackersLocked(it, e.extraTrackers(), true)
 		}
 	}
+}
+
+// statusText - подробный отчет движка (пиры, их флаги choke/interested, куски) для отладки.
+func (e *Engine) statusText() string {
+	e.mu.Lock()
+	cl := e.cl
+	e.mu.Unlock()
+	var b strings.Builder
+	cl.WriteStatus(&b)
+	return b.String()
 }
 
 // ---------- сохранение ----------

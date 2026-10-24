@@ -75,7 +75,11 @@ func main() {
 		waitForExit(*afterUpdate, 30*time.Second)
 		cleanupOldExe()
 	}
-	if !acquireInstance() && forwardToRunning(paths, items, len(items) == 0 && !*minimized, 15*time.Second) {
+	if !acquireInstance(paths) {
+		// программа уже запущена: отдаем ей аргументы; вторую копию не запускаем никогда
+		if !forwardToRunning(paths, items, len(items) == 0 && !*minimized, 30*time.Second) {
+			messageBox(appName, appName+" уже запущен, но не отвечает. Закройте его через значок в трее или в диспетчере задач и запустите снова.")
+		}
 		return
 	}
 	setupLogging(paths)
@@ -159,44 +163,33 @@ func (a *App) handleArgs(args []string) bool {
 }
 
 func (a *App) openTorrentFolder(id string, fileIndex int) error {
-	files, err := a.engine.Files(id)
-	if err != nil {
-		return err
-	}
-	a.engine.mu.Lock()
-	it, ok := a.engine.items[id]
-	save := ""
+	e := a.engine
+	e.mu.Lock()
+	it, ok := e.items[id]
+	var root, save string
+	var files []string
 	if ok {
-		save = it.SavePath
+		root, files, save = e.rootPath(it), e.filePaths(it), it.SavePath
 	}
-	a.engine.mu.Unlock()
+	e.mu.Unlock()
 	if !ok {
 		return errNotFound
 	}
-	if fileIndex >= 0 {
-		for _, f := range files {
-			if f["index"] == fileIndex {
-				p := filepath.Join(save, f["path"].(string))
-				if !fileExists(p) && fileExists(p+".part") {
-					p += ".part"
-				}
-				return openInExplorer(p, true)
-			}
-		}
-		return errNotFound
-	}
-	if len(files) == 1 {
-		p := filepath.Join(save, files[0]["path"].(string))
+	existing := func(p string) string {
 		if !fileExists(p) && fileExists(p+".part") {
-			p += ".part"
+			return p + ".part"
 		}
-		return openInExplorer(p, true)
+		return p
 	}
-	if len(files) > 1 {
-		root := strings.SplitN(filepath.ToSlash(files[0]["path"].(string)), "/", 2)[0]
-		if d := filepath.Join(save, root); fileExists(d) {
-			return openInExplorer(d, false)
-		}
+	switch {
+	case fileIndex >= 0 && fileIndex < len(files):
+		return openInExplorer(existing(files[fileIndex]), true)
+	case fileIndex >= 0:
+		return errNotFound
+	case len(files) == 1:
+		return openInExplorer(existing(files[0]), true)
+	case root != "" && fileExists(root):
+		return openInExplorer(root, false)
 	}
 	return openInExplorer(save, false)
 }

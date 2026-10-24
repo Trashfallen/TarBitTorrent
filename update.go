@@ -136,7 +136,9 @@ func (u *Updater) Check() {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 404 {
-		u.set(func(s *UpdateState) { s.Checked, s.Available, s.Message = true, false, "Релизов пока нет" })
+		u.set(func(s *UpdateState) {
+			s.Checked, s.Available, s.Message = true, false, "Релизов пока нет"
+		})
 		return
 	}
 	if resp.StatusCode != 200 {
@@ -154,7 +156,9 @@ func (u *Updater) Check() {
 		} `json:"assets"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		u.set(func(s *UpdateState) { s.Checked, s.Error = true, "не разобрал ответ GitHub: "+err.Error() })
+		u.set(func(s *UpdateState) {
+			s.Checked, s.Error = true, "не разобрал ответ GitHub: "+err.Error()
+		})
 		return
 	}
 	asset, size := "", int64(0)

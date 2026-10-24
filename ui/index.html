@@ -109,6 +109,13 @@
         <label>Куда сохранить</label>
         <div class="row-inline"><input class="input" id="pendPath" spellcheck="false"><button class="btn" id="pendBrowse">Обзор</button></div>
       </div>
+      <div class="field">
+        <div class="row-inline">
+          <label class="check" style="flex:none"><input type="checkbox" id="pendMkdir"> Создать папку</label>
+          <input class="input" id="pendFolder" spellcheck="false" placeholder="Имя папки">
+        </div>
+        <div class="hint" id="pendWhere"></div>
+      </div>
       <div class="field" id="pendFilesField">
         <div class="row-inline"><label style="flex:1">Файлы</label>
           <button class="btn ghost" id="pendAll">Выбрать все</button><button class="btn ghost" id="pendNone">Снять все</button></div>

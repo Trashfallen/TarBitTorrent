@@ -53,12 +53,12 @@ type point struct{ X, Y int32 }
 type rect struct{ Left, Top, Right, Bottom int32 }
 
 type windowPlacement struct {
-	Length           uint32
-	Flags            uint32
-	ShowCmd          uint32
-	MinPosition      point
-	MaxPosition      point
-	NormalPosition   rect
+	Length         uint32
+	Flags          uint32
+	ShowCmd        uint32
+	MinPosition    point
+	MaxPosition    point
+	NormalPosition rect
 }
 
 type Window struct {
@@ -74,8 +74,8 @@ type Window struct {
 }
 
 var (
-	theWindow  *Window
-	wndProcCb  = windows.NewCallback(subclassProc)
+	theWindow *Window
+	wndProcCb = windows.NewCallback(subclassProc)
 )
 
 func newWindow(app *App) *Window {

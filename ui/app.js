@@ -613,6 +613,7 @@ function renderGeneral(pane, d) {
     : "";
   const kv = [
     ["Сохраняется в", `<span title="${esc(d.save_path)}">${esc(d.save_path)}</span>`],
+    ["Папка раздачи", esc(d.folder || "без папки")],
     ["Размер", d.has_metadata ? fmtSize(d.size) : "неизвестен"],
     ["Скачано", `${fmtSize(d.done)} (${pct(d.progress)})`],
     ["Загрузка / отдача", `${fmtSpeed(d.dl)} / ${fmtSpeed(d.ul)}`],
@@ -883,6 +884,9 @@ function showPending() {
     p.comment ? esc(p.comment).slice(0, 120) : "",
   ].filter(Boolean).map((x) => `<span>${x}</span>`).join("");
   $("pendPath").value = S.settings.save_path_effective || "";
+  $("pendMkdir").checked = S.settings.create_folder !== false;
+  $("pendFolder").value = p.name || "";
+  updatePendWhere();
   $("pendStart").checked = !S.settings.start_paused;
   $("pendSeq").checked = !!S.settings.sequential_default;
   $("pendFilesField").style.display = p.files.length > 1 ? "" : "none";
@@ -891,6 +895,22 @@ function showPending() {
   updatePendSel();
   openOverlay("pendOverlay");
 }
+
+// куда лягут файлы: подсказка под полем имени папки
+function updatePendWhere() {
+  const p = S.pending.find((x) => x.pid === S.pendingShown);
+  const mk = $("pendMkdir").checked;
+  $("pendFolder").disabled = !mk;
+  const base = $("pendPath").value.trim().replace(/[\\/]+$/, "");
+  const folder = $("pendFolder").value.trim() || (p && p.name) || "";
+  const single = p && p.files.length === 1 ? p.files[0].path : "";
+  let where = mk ? `${base}\\${folder}` : base;
+  if (single) where += `\\${single}`;
+  $("pendWhere").textContent = (single ? "Файл будет: " : "Файлы будут в: ") + where;
+}
+$("pendMkdir").addEventListener("change", updatePendWhere);
+$("pendFolder").addEventListener("input", updatePendWhere);
+$("pendPath").addEventListener("input", updatePendWhere);
 
 function updatePendSel() {
   const p = S.pending.find((x) => x.pid === S.pendingShown);
@@ -907,6 +927,7 @@ $("pendNone").onclick = () => { $("pendFiles").querySelectorAll("input").forEach
 $("pendBrowse").onclick = async () => {
   const r = await run(() => api("pick_folder", { initial: $("pendPath").value }));
   if (r && r.path) $("pendPath").value = r.path;
+  updatePendWhere();
 };
 
 function finishPending() {
@@ -922,6 +943,7 @@ $("pendOk").onclick = async () => {
   if (Object.keys(priorities).length && !Object.values(priorities).some(Boolean)) return toast("Не выбрано ни одного файла", "err");
   const r = await run(() => api(`pending/${pid}/confirm`, {
     save_path: $("pendPath").value.trim(), paused: !$("pendStart").checked, sequential: $("pendSeq").checked, priorities,
+    create_folder: $("pendMkdir").checked, folder: $("pendFolder").value.trim(),
   }));
   finishPending();
   if (r) {
@@ -990,6 +1012,7 @@ function renderSettings(active) {
       <div class="row-inline"><input class="input" data-key="save_path" value="${esc(s.save_path)}" placeholder="${esc(s.save_path_effective)}" spellcheck="false">
       <button class="btn" id="setBrowse">Обзор</button><button class="btn icon" id="setOpenDir" title="Открыть папку">${ico("folder")}</button></div></div>
     ${sw("ask_on_add", "Спрашивать при добавлении", "Окно с выбором папки и файлов перед началом загрузки", s.ask_on_add)}
+    ${sw("create_folder", "Создавать папку для раздачи", "Имя папки - название раздачи; в окне добавления его можно поменять", s.create_folder)}
     ${sw("start_paused", "Добавлять на паузе", "", s.start_paused)}
     ${sw("sequential_default", "Качать по порядку", "Удобно для видео: можно смотреть, не дожидаясь конца", s.sequential_default)}
     ${sw("notify_finished", "Уведомлять о завершении", "Всплывающее уведомление Windows", s.notify_finished)}
