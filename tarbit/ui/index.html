@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TarBitTorrent</title>
+<link rel="icon" type="image/png" sizes="256x256" href="icon-256.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><img src="icon-64.png" alt=""><span>TarBit<b>Torrent</b></span></div>
+    <button class="btn primary" id="btnAdd" title="Добавить раздачу (Ctrl+O)"></button>
+    <div class="sep"></div>
+    <button class="btn icon ghost" id="btnResume" title="Возобновить выбранные"></button>
+    <button class="btn icon ghost" id="btnPause" title="Приостановить выбранные"></button>
+    <button class="btn icon ghost" id="btnDelete" title="Удалить выбранные (Delete)"></button>
+    <button class="btn icon ghost" id="btnFolder" title="Открыть папку"></button>
+    <div class="spacer"></div>
+    <div class="search" id="searchBox"><input id="search" placeholder="Поиск по раздачам" spellcheck="false"></div>
+    <button class="btn" id="btnAlt" title="Ограничить скорость (значения в настройках)"></button>
+    <button class="btn icon ghost" id="btnTheme" title="Сменить тему"></button>
+    <button class="btn icon ghost" id="btnSettings" title="Настройки"></button>
+  </header>
+
+  <div class="banner" id="banner">
+    <span id="bannerIco"></span>
+    <span id="bannerText"></span>
+    <div class="progress thin" id="bannerProg" hidden><i></i><span></span></div>
+    <div class="spacer"></div>
+    <button class="btn ghost" id="bannerNotes">Что нового</button>
+    <button class="btn primary" id="bannerInstall">Обновить</button>
+  </div>
+
+  <div class="body">
+    <aside id="sidebar">
+      <h4>Раздачи</h4>
+      <div id="filters"></div>
+      <h4>Сеть</h4>
+      <div class="net" id="net"></div>
+    </aside>
+
+    <main>
+      <div class="list" id="list">
+        <table id="table">
+          <colgroup id="cols"></colgroup>
+          <thead><tr id="thead"></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+        <div class="empty" id="empty">
+          <div class="drop">
+            <img src="icon-128.png" alt="">
+            <h2>Перетащите сюда .torrent или вставьте magnet-ссылку</h2>
+            <div>Ctrl+V в любом месте окна, или кнопка «Добавить»</div>
+            <div><button class="btn primary" id="emptyAdd">Добавить раздачу</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="splitter" id="splitter"></div>
+      <section class="details" id="details">
+        <div class="tabs" id="tabs">
+          <div class="tab active" data-tab="general">Общее</div>
+          <div class="tab" data-tab="files">Файлы</div>
+          <div class="tab" data-tab="peers">Пиры</div>
+          <div class="tab" data-tab="trackers">Трекеры</div>
+          <div class="tab" data-tab="speed">Скорость</div>
+        </div>
+        <div class="pane" id="pane"></div>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <span class="sp dl" id="fDl"></span>
+    <span class="sp ul" id="fUl"></span>
+    <canvas id="fGraph" width="280" height="40"></canvas>
+    <span id="fDht"></span>
+    <span id="fPeers"></span>
+    <span class="ver" id="fVer" title="О программе и обновления"></span>
+  </footer>
+</div>
+
+<!-- Добавление -->
+<div class="overlay" id="addOverlay">
+  <div class="modal">
+    <header><h3>Добавить раздачу</h3><button class="btn icon ghost" data-close></button></header>
+    <div class="content">
+      <div class="field">
+        <label for="addMagnet">Magnet-ссылки или хеши (по одной на строку)</label>
+        <textarea class="input" id="addMagnet" placeholder="magnet:?xt=urn:btih:..." spellcheck="false"></textarea>
+      </div>
+      <div class="dropzone" id="addDrop">Выбрать файлы .torrent или перетащить их сюда</div>
+      <input type="file" id="addFile" accept=".torrent,application/x-bittorrent" multiple hidden>
+    </div>
+    <footer><button class="btn" data-close>Отмена</button><button class="btn primary" id="addGo">Добавить</button></footer>
+  </div>
+</div>
+
+<!-- Подтверждение раздачи -->
+<div class="overlay" id="pendOverlay">
+  <div class="modal wide">
+    <header><h3 id="pendTitle"></h3><button class="btn icon ghost" id="pendX"></button></header>
+    <div class="content">
+      <div class="add-meta" id="pendMeta"></div>
+      <div class="field">
+        <label>Куда сохранить</label>
+        <div class="row-inline"><input class="input" id="pendPath" spellcheck="false"><button class="btn" id="pendBrowse">Обзор</button></div>
+      </div>
+      <div class="field" id="pendFilesField">
+        <div class="row-inline"><label style="flex:1">Файлы</label>
+          <button class="btn ghost" id="pendAll">Выбрать все</button><button class="btn ghost" id="pendNone">Снять все</button></div>
+        <div class="files-box"><table><colgroup><col style="width:36px"><col><col style="width:110px"></colgroup>
+          <thead><tr><th></th><th>Имя</th><th class="num">Размер</th></tr></thead><tbody id="pendFiles"></tbody></table></div>
+      </div>
+      <label class="check"><input type="checkbox" id="pendStart" checked> Начать загрузку сразу</label>
+      <label class="check"><input type="checkbox" id="pendSeq"> Качать по порядку (можно смотреть видео во время загрузки)</label>
+    </div>
+    <footer><span class="muted" id="pendSel" style="margin-right:auto;align-self:center"></span>
+      <button class="btn" id="pendCancel">Не добавлять</button><button class="btn primary" id="pendOk">Добавить</button></footer>
+  </div>
+</div>
+
+<!-- Удаление -->
+<div class="overlay" id="delOverlay">
+  <div class="modal">
+    <header><h3 id="delTitle">Удалить раздачи?</h3><button class="btn icon ghost" data-close></button></header>
+    <div class="content">
+      <div id="delNames" class="muted" style="margin-bottom:12px"></div>
+      <label class="check"><input type="checkbox" id="delData"> Удалить и скачанные файлы с диска</label>
+    </div>
+    <footer><button class="btn" data-close>Отмена</button><button class="btn danger solid" id="delGo">Удалить</button></footer>
+  </div>
+</div>
+
+<!-- Настройки -->
+<div class="overlay" id="setOverlay">
+  <div class="modal wide">
+    <header><h3>Настройки</h3><button class="btn icon ghost" data-close></button></header>
+    <div class="settings">
+      <nav id="setNav"></nav>
+      <div id="setBody"></div>
+    </div>
+    <footer><span class="muted" id="setSaved" style="margin-right:auto;align-self:center"></span><button class="btn primary" data-close>Готово</button></footer>
+  </div>
+</div>
+
+<!-- Текст (заметки к релизу, magnet) -->
+<div class="overlay" id="textOverlay">
+  <div class="modal">
+    <header><h3 id="textTitle"></h3><button class="btn icon ghost" data-close></button></header>
+    <div class="content"><div id="textBody" class="sel-text" style="white-space:pre-wrap"></div></div>
+    <footer><button class="btn primary" data-close>Закрыть</button></footer>
+  </div>
+</div>
+
+<div class="menu" id="menu"></div>
+<div class="toasts" id="toasts"></div>
+<div class="dragover" id="dragover"><div>Отпустите, чтобы добавить</div></div>
+<script src="app.js"></script>
+</body>
+</html>

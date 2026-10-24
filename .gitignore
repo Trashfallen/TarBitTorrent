@@ -1,0 +1,9 @@
+# окружение и сборка
+/.venv/
+/build/
+/dist/
+/release/
+__pycache__/
+*.pyc
+*.lnk
+*.exe
