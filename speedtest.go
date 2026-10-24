@@ -2,11 +2,10 @@ package main
 
 // Замер скорости интернета.
 //
-// Speedtest встроен: ближайший сервер Ookla (как на speedtest.net), пинг,
+// Встроенный замер: сервер Ookla (как на speedtest.net) с лучшим пингом, пинг,
 // загрузка и отдача; текущая скорость читается во время замера для шкалы.
 // На время замера раздачи притормаживаются, иначе они съедают канал и портят
-// результат. Яндекс Интернетометр открытого API не имеет, поэтому открывается
-// в отдельном окне программы (webwindow.go) - замер там официальный.
+// результат.
 
 import (
 	"context"
@@ -32,7 +31,7 @@ type SpeedResult struct {
 
 type SpeedState struct {
 	Running bool          `json:"running"`
-	Phase   string        `json:"phase"` // servers | ping | download | upload | done | error | stopped
+	Phase   string        `json:"phase"` // servers | pick | ping | download | upload | done | error | stopped
 	Live    float64       `json:"live"`  // Мбит/с прямо сейчас
 	Current SpeedResult   `json:"current"`
 	Error   string        `json:"error"`
@@ -61,7 +60,7 @@ func (s *SpeedTest) State() SpeedState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.st
-	st.History = append([]SpeedResult(nil), s.st.History...)
+	st.History = append([]SpeedResult{}, s.st.History...)
 	return st
 }
 
@@ -114,14 +113,17 @@ func (s *SpeedTest) run(ctx context.Context, throttle bool) {
 	defer s.cancel()
 
 	client := speedtest.New(speedtest.WithUserConfig(&speedtest.UserConfig{UserAgent: appName + "/" + appVersion}))
-	if user, err := client.FetchUserInfoContext(ctx); err == nil {
-		s.set(func(st *SpeedState) { st.Current.ISP = user.Isp })
-	}
+	go func() { // провайдер - только для подписи, не ждем
+		if user, err := client.FetchUserInfoContext(ctx); err == nil {
+			s.set(func(st *SpeedState) { st.Current.ISP = user.Isp })
+		}
+	}()
 	servers, err := client.FetchServerListContext(ctx)
 	if err != nil {
 		fail(errors.New("список серверов Speedtest недоступен: " + err.Error()))
 		return
 	}
+	s.set(func(st *SpeedState) { st.Phase = "pick" })
 	srv := fastestServer(ctx, servers)
 	if srv == nil {
 		fail(errors.New("ни один сервер Speedtest не ответил"))
@@ -187,14 +189,14 @@ func (s *SpeedTest) run(ctx context.Context, throttle bool) {
 	logf("Замер скорости: пинг %.0f мс, загрузка %.1f Мбит/с, отдача %.1f Мбит/с (%s)", s.st.Current.Ping, down, up, srv.Sponsor)
 }
 
-// fastestServer: из 10 ближайших по геолокации берет сервер с самым низким
+// fastestServer: из 8 ближайших по геолокации берет сервер с самым низким
 // пингом. Геолокация по IP часто ошибается (особенно через VPN), а пинг - нет.
 func fastestServer(ctx context.Context, servers speedtest.Servers) *speedtest.Server {
 	cands := []*speedtest.Server(servers)
-	if len(cands) > 10 {
-		cands = cands[:10]
+	if len(cands) > 8 {
+		cands = cands[:8]
 	}
-	pctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	pctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	var wg sync.WaitGroup
 	for _, c := range cands {

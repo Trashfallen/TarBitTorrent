@@ -5,6 +5,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -133,6 +134,47 @@ func associations() (magnet, torrent bool) {
 
 func openDefaultApps() {
 	openURL("ms-settings:defaultapps?registeredAppUser=" + appName)
+}
+
+// ---------- ярлыки ----------
+
+func knownFolder(id *windows.KNOWNFOLDERID) string {
+	p, err := windows.KnownFolderPath(id, 0)
+	if err != nil {
+		return ""
+	}
+	return p
+}
+
+func desktopShortcut() string {
+	if d := knownFolder(windows.FOLDERID_Desktop); d != "" {
+		return filepath.Join(d, appName+".lnk")
+	}
+	return ""
+}
+
+func startMenuShortcut() string {
+	if d := knownFolder(windows.FOLDERID_Programs); d != "" {
+		return filepath.Join(d, appName+".lnk")
+	}
+	return ""
+}
+
+// createShortcut делает .lnk через WScript.Shell (есть в любой Windows).
+func createShortcut(lnk, target string) error {
+	if lnk == "" {
+		return errors.New("папка для ярлыка не найдена")
+	}
+	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	script := "$s=(New-Object -ComObject WScript.Shell).CreateShortcut(" + q(lnk) + ");" +
+		"$s.TargetPath=" + q(target) + ";$s.WorkingDirectory=" + q(filepath.Dir(target)) + ";" +
+		"$s.IconLocation=" + q(target+",0") + ";$s.Description=" + q("Торрент-клиент") + ";$s.Save()"
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("ярлык не создан: %v %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // ---------- проводник, ссылки ----------

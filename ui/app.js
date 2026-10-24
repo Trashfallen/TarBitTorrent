@@ -98,6 +98,16 @@ const pct = (p) => (p >= 1 ? "100%" : (Math.floor(p * 1000) / 10).toFixed(1) + "
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const $ = (id) => document.getElementById(id);
 
+// setHTML меняет разметку, только если она изменилась. Иначе элемент
+// перерисовывается раз в секунду, и клик, пришедшийся на перерисовку, теряется.
+function setHTML(el, html) {
+  if (typeof el === "string") el = $(el);
+  if (el && el._html !== html) {
+    el.innerHTML = html;
+    el._html = html;
+  }
+}
+
 const STATUS = {
   downloading: ["Загрузка", "down"],
   seeding: ["Раздача", "up"],
@@ -323,8 +333,8 @@ function renderList() {
 }
 
 function renderFilters() {
-  $("filters").innerHTML = FILTERS.map(([key, title, icon, fn]) =>
-    `<div class="filter${S.filter === key ? " active" : ""}" data-f="${key}">${ico(icon)}<span>${title}</span><span class="n">${S.torrents.filter(fn).length}</span></div>`).join("");
+  setHTML("filters", FILTERS.map(([key, title, icon, fn]) =>
+    `<div class="filter${S.filter === key ? " active" : ""}" data-f="${key}">${ico(icon)}<span>${title}</span><span class="n">${S.torrents.filter(fn).length}</span></div>`).join(""));
 }
 $("filters").addEventListener("click", (e) => {
   const f = e.target.closest(".filter");
@@ -340,22 +350,22 @@ function renderNet() {
   const dht = s.dht_nodes || 0;
   const dhtCls = !S.settings.dht ? "" : dht > 50 ? "ok" : dht > 0 ? "warn" : "err";
   const port = s.incoming ? ["ok", "открыт"] : s.upnp && s.upnp.startsWith("проброшен") ? ["ok", "проброшен"] : ["warn", "не проверен"];
-  $("net").innerHTML = `
+  setHTML("net", `
     <div class="row" title="Узлы распределенной сети: через них находятся пиры без трекеров"><span><i class="dot ${dhtCls}"></i>DHT</span><b>${S.settings.dht ? dht + " узл." : "выкл"}</b></div>
     <div class="row" title="Пиры, с которыми сейчас есть соединение"><span><i class="dot ${s.peers ? "ok" : ""}"></i>Пиры</span><b>${s.peers || 0}</b></div>
     <div class="row" title="${esc(s.upnp || "Входящих соединений пока не было")}"><span><i class="dot ${port[0]}"></i>Порт ${s.port || ""}</span><b>${port[1]}</b></div>
     <div class="row" title="Публичные трекеры, которые подмешиваются в открытые раздачи"><span><i class="dot ${S.settings.extra_trackers ? "ok" : ""}"></i>Доп. трекеры</span><b>${S.settings.extra_trackers ? s.trackers_pool : "выкл"}</b></div>
-    <div class="row" title="Переобъявление раздач, у которых мало пиров"><span><i class="dot ${S.settings.peer_hunter ? "ok" : ""}"></i>Охотник</span><b>${S.settings.peer_hunter ? S.torrents.filter((t) => t.hunting).length + " ищут" : "выкл"}</b></div>`;
+    <div class="row" title="Переобъявление раздач, у которых мало пиров"><span><i class="dot ${S.settings.peer_hunter ? "ok" : ""}"></i>Охотник</span><b>${S.settings.peer_hunter ? S.torrents.filter((t) => t.hunting).length + " ищут" : "выкл"}</b></div>`);
 }
 
 function renderFooter() {
   const s = S.session;
-  $("fDl").innerHTML = ico("down") + fmtSpeed(s.dl || 0).replace("-", "0 Б/с");
-  $("fUl").innerHTML = ico("up") + fmtSpeed(s.ul || 0).replace("-", "0 Б/с");
+  setHTML("fDl", ico("down") + fmtSpeed(s.dl || 0).replace("-", "0 Б/с"));
+  setHTML("fUl", ico("up") + fmtSpeed(s.ul || 0).replace("-", "0 Б/с"));
   $("fDht").textContent = S.settings.dht ? `DHT: ${s.dht_nodes || 0}` : "DHT выкл";
   $("fPeers").textContent = `Соединений: ${s.peers || 0}`;
   const u = S.update;
-  $("fVer").innerHTML = `v${esc(S.version || "")}${u.available ? " · доступна " + esc(u.version) : ""}`;
+  setHTML("fVer", `v${esc(S.version || "")}${u.available ? " · доступна " + esc(u.version) : ""}`);
   drawGraph($("fGraph"), s.history || [], false);
   const active = (s.dl || 0) + (s.ul || 0) > 0;
   const parts = [];
@@ -573,11 +583,12 @@ async function renderDetails(force) {
   const pane = $("pane");
   const id = S.focusId;
   if (!id || !S.byId.has(id)) {
-    pane.innerHTML = `<div class="muted" style="padding:20px;text-align:center">Выберите раздачу, чтобы увидеть подробности</div>`;
+    pane._html = null; pane.innerHTML = `<div class="muted" style="padding:20px;text-align:center">Выберите раздачу, чтобы увидеть подробности</div>`;
     return;
   }
   if (detailsBusy && !force) return;
   detailsBusy = true;
+  if (force) pane._html = null;   // другая вкладка или раздача: перерисовать целиком
   try {
     const tab = S.tab;
     if (tab === "general") renderGeneral(pane, await api(`torrent/${id}`));
@@ -586,7 +597,10 @@ async function renderDetails(force) {
     else if (tab === "trackers") renderTrackers(pane, id, await api(`torrent/${id}/trackers`), force);
     else if (tab === "speed") renderSpeed(pane, await api(`torrent/${id}`));
   } catch (e) {
-    if (!String(e.message).startsWith("не найдено")) pane.innerHTML = `<div class="muted">${esc(e.message)}</div>`;
+    if (!String(e.message).startsWith("не найдено")) {
+      pane._html = null;
+      pane.innerHTML = `<div class="muted">${esc(e.message)}</div>`;
+    }
   } finally {
     detailsBusy = false;
   }
@@ -624,8 +638,8 @@ function renderGeneral(pane, d) {
     ["Хеш v2", `<span class="mono" title="${esc(d.hash_v2)}">${esc(d.hash_v2 || "-")}</span>`],
     ["Комментарий", `<span title="${esc(d.comment)}">${esc(d.comment || "-")}</span>`],
   ];
-  pane.innerHTML = `<canvas class="pieces" id="pieces"></canvas>${huntHtml}${d.error ? `<div class="hunt" style="color:var(--err)">${ico("alert")}${esc(d.error)}</div>` : ""}
-    <div class="kv">${kv.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div>`;
+  setHTML(pane, `<canvas class="pieces" id="pieces"></canvas>${huntHtml}${d.error ? `<div class="hunt" style="color:var(--err)">${ico("alert")}${esc(d.error)}</div>` : ""}
+    <div class="kv">${kv.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div>`);
   drawPieces($("pieces"), d.piece_map || [], d.progress);
 }
 
@@ -651,13 +665,13 @@ function drawPieces(cv, map, progress) {
 const PRIO = [[0, "Не качать"], [4, "Обычный"], [7, "Высокий"]];
 function renderFiles(pane, id, files, force) {
   if (!files.length) {
-    pane.innerHTML = `<div class="muted">Список файлов появится, когда будут получены данные о раздаче.</div>`;
+    pane._html = null; pane.innerHTML = `<div class="muted">Список файлов появится, когда будут получены данные о раздаче.</div>`;
     return;
   }
   const key = id + ":" + files.length;
   if (force || pane.dataset.key !== key) {
     pane.dataset.key = key;
-    pane.innerHTML = `<table><colgroup><col style="width:34px"><col><col style="width:100px"><col style="width:160px"><col style="width:130px"></colgroup>
+    pane._html = null; pane.innerHTML = `<table><colgroup><col style="width:34px"><col><col style="width:100px"><col style="width:160px"><col style="width:130px"></colgroup>
       <thead><tr><th></th><th>Имя</th><th class="num">Размер</th><th>Прогресс</th><th>Приоритет</th></tr></thead>
       <tbody>${files.map((f) => `<tr data-i="${f.index}"><td><input type="checkbox" class="fchk"></td><td class="name" title="${esc(f.path)}">${esc(f.path)}</td>
         <td class="num">${fmtSize(f.size)}</td><td><div class="progress"><i></i><span></span></div></td>
@@ -692,16 +706,16 @@ function renderFiles(pane, id, files, force) {
 
 function renderPeers(pane, peers) {
   if (!peers.length) {
-    pane.innerHTML = `<div class="muted">Пока нет соединений. Программа продолжает искать пиров через трекеры, DHT, PEX и локальную сеть.</div>`;
+    setHTML(pane, `<div class="muted">Пока нет соединений. Программа продолжает искать пиров через трекеры, DHT, PEX и локальную сеть.</div>`);
     return;
   }
-  pane.innerHTML = `<table><colgroup><col style="width:190px"><col><col style="width:120px"><col style="width:95px"><col style="width:95px"><col style="width:95px"><col style="width:180px"></colgroup>
+  setHTML(pane, `<table><colgroup><col style="width:190px"><col><col style="width:120px"><col style="width:95px"><col style="width:95px"><col style="width:95px"><col style="width:180px"></colgroup>
     <thead><tr><th>Адрес</th><th>Клиент</th><th>Прогресс</th><th class="num">Загрузка</th><th class="num">Отдача</th><th class="num">Скачано</th><th>Откуда</th></tr></thead>
     <tbody>${peers.map((p) => `<tr><td class="mono sel-text">${esc(p.ip.includes(":") ? `[${p.ip}]` : p.ip)}:${p.port}${p.encrypted ? " 🔒" : ""}</td>
       <td title="${esc(p.client)}">${p.seed ? '<span class="chip ok">сид</span>' : ""}${esc(p.client || "?")}</td>
       <td><div class="progress ${p.seed ? "s-seeding" : "s-downloading"}"><i style="width:${(p.progress * 100).toFixed(1)}%"></i><span>${pct(p.progress)}</span></div></td>
       <td class="num">${fmtSpeed(p.dl)}</td><td class="num">${fmtSpeed(p.ul)}</td><td class="num">${fmtSize(p.downloaded)}</td>
-      <td>${p.sources.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</td></tr>`).join("")}</tbody></table>`;
+      <td>${p.sources.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</td></tr>`).join("")}</tbody></table>`);
 }
 
 const TR_STATUS = { working: ["работает", "ok"], updating: ["опрашиваю", "warn"], error: ["ошибка", "err"], idle: ["ждет", ""], disabled: ["выключено", ""] };
@@ -718,11 +732,11 @@ function trackerRows(rows) {
 function renderTrackers(pane, id, rows, force) {
   const body = pane.querySelector("#trBody");
   if (body && !force && pane.dataset.key === "tr:" + id) {
-    body.innerHTML = trackerRows(rows);
+    setHTML(body, trackerRows(rows));
     return;
   }
   pane.dataset.key = "tr:" + id;
-  pane.innerHTML = `<table><colgroup><col><col style="width:110px"><col style="width:80px"><col style="width:80px"><col style="width:90px"><col style="width:260px"></colgroup>
+  pane._html = null; pane.innerHTML = `<table><colgroup><col><col style="width:110px"><col style="width:80px"><col style="width:80px"><col style="width:90px"><col style="width:260px"></colgroup>
     <thead><tr><th>Адрес</th><th>Статус</th><th class="num">Сиды</th><th class="num">Пиры</th><th class="num">Через</th><th>Сообщение</th></tr></thead>
     <tbody id="trBody">${trackerRows(rows)}</tbody></table>
     <div class="field" style="margin-top:14px"><label>Добавить трекеры (по одному на строку)</label>
@@ -739,7 +753,7 @@ function renderTrackers(pane, id, rows, force) {
 
 function renderSpeed(pane, d) {
   if (!pane.querySelector("#tGraph")) {
-    pane.innerHTML = `<div class="legend"><span><i style="background:var(--dl)"></i>Загрузка <b id="lgDl"></b></span><span><i style="background:var(--ul)"></i>Отдача <b id="lgUl"></b></span><span class="muted">последние 2 минуты</span></div>
+    pane._html = null; pane.innerHTML = `<div class="legend"><span><i style="background:var(--dl)"></i>Загрузка <b id="lgDl"></b></span><span><i style="background:var(--ul)"></i>Отдача <b id="lgUl"></b></span><span class="muted">последние 2 минуты</span></div>
       <canvas class="graph" id="tGraph"></canvas>`;
   }
   $("lgDl").textContent = fmtSpeed(d.dl);
@@ -1021,6 +1035,9 @@ function renderSettings(active) {
   <section data-s="windows">
     <h4>Запуск</h4>
     ${ig.frozen ? sw("autostart", "Запускать вместе с Windows", "Программа стартует свернутой в трей", ig.autostart) : `<div class="muted">Автозапуск и ассоциации доступны в собранной программе (exe).</div>`}
+    <h4>Ярлык</h4>
+    <div class="toggle"><div class="t"><b>Ярлык на рабочем столе</b><span>${ig.shortcut ? "Есть" : "Нет"}${ig.exe ? " · программа: " + esc(ig.exe) : ""}</span></div>
+      <button class="btn" id="setShortcut"${ig.frozen ? "" : " disabled"}>${ico(ig.shortcut ? "refresh" : "plus")}${ig.shortcut ? "Пересоздать" : "Создать ярлык"}</button></div>
     <h4>Ссылки и файлы</h4>
     <div class="toggle"><div class="t"><b>Magnet-ссылки</b><span>${ig.magnet ? "Открываются в TarBitTorrent" : "Открываются другой программой или ничем"}</span></div><span class="chip ${ig.magnet ? "ok" : ""}">${ig.magnet ? "да" : "нет"}</span></div>
     <div class="toggle"><div class="t"><b>Файлы .torrent</b><span>${ig.torrent ? "Открываются в TarBitTorrent" : "Открываются другой программой или ничем"}</span></div><span class="chip ${ig.torrent ? "ok" : ""}">${ig.torrent ? "да" : "нет"}</span></div>
@@ -1114,6 +1131,11 @@ function bindSettings() {
     const r = await run(() => api("associate", {}));
     if (r) { S.integration = r; renderSettings("windows"); toast(r.magnet && r.torrent ? "Готово: magnet и .torrent открываются здесь" : "Выберите TarBitTorrent в открывшемся окне Windows", "ok"); }
   };
+  const sc = $("setShortcut");
+  if (sc) sc.onclick = async () => {
+    const r = await run(() => api("shortcut", {}), "Ярлык на рабочем столе создан");
+    if (r) { S.integration = r; renderSettings("windows"); }
+  };
   const chk = $("setCheck");
   if (chk) chk.onclick = async () => {
     chk.disabled = true;
@@ -1139,10 +1161,10 @@ function renderBanner() {
   const show = u.available || u.busy;
   $("banner").classList.toggle("show", !!show);
   if (!show) return;
-  $("bannerIco").innerHTML = ico(u.busy ? "refresh" : "zap");
-  $("bannerText").innerHTML = u.busy ? esc(u.message || "Обновляю")
+  setHTML("bannerIco", ico(u.busy ? "refresh" : "zap"));
+  setHTML("bannerText", u.busy ? esc(u.message || "Обновляю")
     : u.error ? `Обновление до ${esc(u.version)} не удалось: ${esc(u.error)}`
-    : `Доступна новая версия <b>${esc(u.version)}</b>`;
+    : `Доступна новая версия <b>${esc(u.version)}</b>`);
   $("bannerProg").hidden = !u.busy;
   $("bannerProg").firstChild.style.width = Math.max(u.progress, 0) * 100 + "%";
   $("bannerInstall").disabled = !!u.busy || !u.can_install;
@@ -1162,7 +1184,7 @@ function gaugeFrac(v) {
   }
   return 1;
 }
-const SP_PHASE = { servers: "Ищу ближайший сервер", ping: "Измеряю пинг", download: "Загрузка", upload: "Отдача",
+const SP_PHASE = { servers: "Получаю список серверов...", pick: "Выбираю сервер с лучшим пингом...", ping: "Измеряю пинг", download: "Загрузка", upload: "Отдача",
   done: "Готово", error: "Ошибка", stopped: "Остановлено", "": "Нажмите «Начать замер»" };
 
 function buildGauge() {
@@ -1206,23 +1228,35 @@ function renderSpeedTest(st) {
   $("spJitter").textContent = c.jitter > 0 ? `джиттер ${c.jitter.toFixed(1)} мс` : "";
   $("spDown").textContent = fmtMbps(c.down);
   $("spUp").textContent = fmtMbps(c.up);
-  $("spServer").innerHTML = [c.sponsor ? `Сервер: <b>${esc(c.sponsor)}</b> (${esc(c.server)})` : "", c.isp ? `Провайдер: ${esc(c.isp)}` : ""]
-    .filter(Boolean).join(" · ");
-  $("spGo").innerHTML = st.running ? ico("x") + "Остановить" : ico("zap") + (st.phase === "done" ? "Замерить еще раз" : "Начать замер");
-  $("spGo").dataset.running = st.running ? "1" : "";
-  $("spHistory").innerHTML = (st.history || []).slice().reverse().map((h) => `<tr><td>${fmtDate(h.time)}</td>
+  setHTML("spServer", [c.sponsor ? `Сервер: <b>${esc(c.sponsor)}</b> (${esc(c.server)})` : "", c.isp ? `Провайдер: ${esc(c.isp)}` : ""]
+    .filter(Boolean).join(" · "));
+  if (!spStarting) {
+    setHTML("spGo", st.running ? ico("x") + "Остановить" : ico("zap") + (st.phase === "done" ? "Замерить еще раз" : "Начать замер"));
+    $("spGo").dataset.running = st.running ? "1" : "";
+    $("spGo").disabled = false;
+  }
+  setHTML("spHistory", (st.history || []).slice().reverse().map((h) => `<tr><td>${fmtDate(h.time)}</td>
     <td class="num">${h.ping.toFixed(0)} мс</td><td class="num">${fmtMbps(h.down)} Мбит/с</td><td class="num">${fmtMbps(h.up)} Мбит/с</td>
-    <td title="${esc(h.sponsor)}">${esc(h.sponsor)}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">Замеров пока не было</td></tr>`;
+    <td title="${esc(h.sponsor)}">${esc(h.sponsor)}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">Замеров пока не было</td></tr>`);
 }
 $("btnSpeed").innerHTML = ico("zap") + "<span>Скорость интернета</span>";
 $("btnSpeed").onclick = openSpeed;
+let spStarting = false;
 $("spGo").onclick = async () => {
-  if ($("spGo").dataset.running) await run(() => api("speedtest/stop", {}));
-  else await run(() => api("speedtest/start", { throttle: $("spThrottle").checked }));
-  pollSpeed();
+  const btn = $("spGo");
+  if (btn.disabled) return;
+  // сразу показать, что нажатие принято: поиск сервера занимает несколько секунд
+  spStarting = true;
+  btn.disabled = true;
+  setHTML(btn, ico("refresh", "spin") + (btn.dataset.running ? "Останавливаю..." : "Запускаю..."));
+  try {
+    if (btn.dataset.running) await run(() => api("speedtest/stop", {}));
+    else await run(() => api("speedtest/start", { throttle: $("spThrottle").checked }));
+  } finally {
+    spStarting = false;
+    pollSpeed();
+  }
 };
-$("spYandex").onclick = () => run(() => api("webwindow", { site: "yandex" }));
-$("spOokla").onclick = () => run(() => api("webwindow", { site: "speedtest" }));
 
 // ---------- клавиатура ----------
 

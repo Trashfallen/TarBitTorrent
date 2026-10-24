@@ -115,3 +115,15 @@ func TestUIEmbedded(t *testing.T) {
 		t.Errorf("VERSION file: %q", v)
 	}
 }
+
+func TestCreateShortcut(t *testing.T) {
+	dir := t.TempDir()
+	target, _ := os.Executable()
+	lnk := filepath.Join(dir, "it's a test.lnk") // апостроф: проверка экранирования
+	if err := createShortcut(lnk, target); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(lnk); err != nil || fi.Size() == 0 {
+		t.Fatalf("shortcut not written: %v", err)
+	}
+}

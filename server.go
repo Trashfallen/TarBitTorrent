@@ -342,6 +342,8 @@ func (s *Server) route(method string, parts []string, body M) (any, error) {
 		}
 	case "associate":
 		return app.associate()
+	case "shortcut":
+		return app.desktopShortcut()
 	case "speedtest":
 		switch arg(1) {
 		case "start":
@@ -351,11 +353,6 @@ func (s *Server) route(method string, parts []string, body M) (any, error) {
 			app.speed.Stop()
 			return nil, nil
 		}
-	case "webwindow":
-		if !openWebWindow(app, str(body, "site")) {
-			return nil, errors.New("неизвестный сайт")
-		}
-		return nil, nil
 	case "open":
 		var args []string
 		if l, ok := body["args"].([]any); ok {

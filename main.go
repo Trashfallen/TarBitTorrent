@@ -99,10 +99,12 @@ func main() {
 	}
 	app.server.Start()
 	writeInstance(paths, app.server.Port(), app.server.token)
-	if exe := exePath(); appVersion != "dev" && exe != "" {
+	// тестовые копии (TARBIT_HOME) в Windows не регистрируются: путь к ним временный
+	if exe := exePath(); appVersion != "dev" && exe != "" && os.Getenv("TARBIT_HOME") == "" {
 		if err := registerApp(exe); err != nil {
 			logf("Регистрация в Windows: %v", err)
 		}
+		go ensureStartMenu(exe)
 	}
 	app.updater.startBackground(func() bool { return app.cfg.Bool("check_updates") })
 
@@ -208,7 +210,27 @@ func (a *App) setAutostart(on bool) error {
 
 func (a *App) integrationState() M {
 	m, t := associations()
-	return M{"frozen": appVersion != "dev", "autostart": autostartEnabled(), "magnet": m, "torrent": t}
+	return M{"frozen": appVersion != "dev", "autostart": autostartEnabled(), "magnet": m, "torrent": t,
+		"shortcut": fileExists(desktopShortcut()), "exe": exePath()}
+}
+
+// ensureStartMenu: ярлык в меню «Пуск» ставится сам, если его еще нет.
+func ensureStartMenu(exe string) {
+	if lnk := startMenuShortcut(); lnk != "" && !fileExists(lnk) {
+		if err := createShortcut(lnk, exe); err != nil {
+			logf("Ярлык в меню Пуск: %v", err)
+		}
+	}
+}
+
+func (a *App) desktopShortcut() (M, error) {
+	if appVersion == "dev" {
+		return nil, errors.New("доступно в собранной программе")
+	}
+	if err := createShortcut(desktopShortcut(), exePath()); err != nil {
+		return nil, err
+	}
+	return a.integrationState(), nil
 }
 
 func (a *App) associate() (M, error) {
@@ -236,7 +258,6 @@ func (a *App) Quit() {
 		logf("Выход")
 		close(a.quitCh)
 		a.speed.Stop()
-		closeWebWindows()
 		a.window.Close()
 		if a.trayReady.Load() {
 			systray.Quit()

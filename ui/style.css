@@ -184,6 +184,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .status-text { color: var(--c); font-weight: 500; }
 .searching-pulse { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
+svg.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .empty {
   position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-3); text-align: center; padding: 20px;
@@ -349,5 +351,4 @@ textarea.input { height: 110px; padding: 8px 10px; resize: vertical; font-family
 .scard.dl b { color: var(--dl); }
 .scard.ul b { color: var(--ul); }
 .speed-server { margin-top: 12px; color: var(--text-2); min-height: 20px; }
-.speed-other { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 @media (max-width: 760px) { .speed-main { grid-template-columns: 1fr; } }
