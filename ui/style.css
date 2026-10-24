@@ -328,3 +328,26 @@ textarea.input { height: 110px; padding: 8px 10px; resize: vertical; font-family
 .mono { font-family: var(--mono); font-size: 12px; }
 .sel-text { user-select: text; }
 .right { text-align: right; }
+
+/* ---------- скорость интернета ---------- */
+.speed-btn { margin-top: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+.speed-btn svg { color: var(--accent); }
+.speed-main { display: grid; grid-template-columns: 320px 1fr; gap: 24px; align-items: center; }
+.gauge { width: 100%; height: auto; display: block; }
+.gauge .track { stroke: var(--track); }
+.gauge .val { transition: stroke-dasharray .25s ease; }
+.gauge .mark { fill: var(--text-3); font-size: 11px; text-anchor: middle; }
+.gauge .num { fill: var(--text); font-size: 44px; font-weight: 700; text-anchor: middle; font-variant-numeric: tabular-nums; }
+.gauge .unit { fill: var(--text-3); font-size: 13px; text-anchor: middle; }
+.gauge .phase { fill: var(--text-2); font-size: 13px; text-anchor: middle; }
+.speed-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.scard { padding: 12px 14px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); display: grid; gap: 2px; }
+.scard span { color: var(--text-3); font-size: 12px; }
+.scard b { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.scard i { font-style: normal; color: var(--text-3); font-size: 12px; }
+.scard small { color: var(--text-3); font-size: 11px; }
+.scard.dl b { color: var(--dl); }
+.scard.ul b { color: var(--ul); }
+.speed-server { margin-top: 12px; color: var(--text-2); min-height: 20px; }
+.speed-other { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+@media (max-width: 760px) { .speed-main { grid-template-columns: 1fr; } }

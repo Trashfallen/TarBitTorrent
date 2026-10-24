@@ -1,13 +1,12 @@
 @echo off
-rem Builds dist\TarBitTorrent.exe (one file, no console).
-rem Needs Python 3.12 (py -3.12): libtorrent has no wheels for newer Python yet.
+rem Builds dist\TarBitTorrent.exe: icon and version in resources, no console window.
+rem Pure Go (CGO_ENABLED=0), no C compiler needed. Version is taken from the VERSION file.
 setlocal
 cd /d "%~dp0"
-if not exist .venv\Scripts\python.exe (
-  py -3.12 -m venv .venv || exit /b 1
-)
-.venv\Scripts\python -m pip install -q -r requirements.txt || exit /b 1
-.venv\Scripts\python tools\version_info.py || exit /b 1
-.venv\Scripts\pyinstaller --noconfirm --clean --log-level WARN TarBitTorrent.spec || exit /b 1
-echo.
-echo Built: dist\TarBitTorrent.exe
+set /p VERSION=<VERSION
+go run github.com/tc-hib/go-winres@v0.3.3 simply --icon assets\icon.ico --manifest gui --arch amd64 ^
+  --product-name TarBitTorrent --file-description "TarBitTorrent" --product-version %VERSION% ^
+  --file-version %VERSION% --original-filename TarBitTorrent.exe --out rsrc || exit /b 1
+set CGO_ENABLED=0
+go build -trimpath -ldflags "-H=windowsgui -s -w -X main.appVersion=%VERSION%" -o dist\TarBitTorrent.exe . || exit /b 1
+echo Built: dist\TarBitTorrent.exe (%VERSION%)

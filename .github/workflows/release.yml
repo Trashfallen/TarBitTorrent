@@ -1,5 +1,5 @@
-# Тег vX.Y.Z -> сборка TarBitTorrent.exe на Windows и релиз на GitHub с этим файлом.
-# Программа сама найдет релиз и предложит обновиться.
+# Тег vX.Y.Z -> тесты, сборка TarBitTorrent.exe и релиз на GitHub с этим файлом.
+# Установленные копии программы сами найдут релиз и предложат обновиться.
 name: release
 
 on:
@@ -12,29 +12,27 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v5
         with:
-          python-version: "3.12"
+          go-version-file: go.mod
 
-      - name: Версия в коде совпадает с тегом
+      - name: Версия в VERSION совпадает с тегом
         shell: pwsh
         run: |
-          $v = python -c "from tarbit.version import VERSION; print(VERSION)"
-          if ("v$v" -ne "${{ github.ref_name }}") { throw "tarbit/version.py = $v, тег = ${{ github.ref_name }}" }
-
-      - name: Зависимости
-        run: python -m pip install -r requirements.txt
+          $v = (Get-Content VERSION -Raw).Trim()
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "VERSION = $v, тег = ${{ github.ref_name }}" }
 
       - name: Тесты
-        run: python -m unittest discover -s tests -v
+        run: go test ./...
 
       - name: Сборка
-        run: |
-          python tools/version_info.py
-          pyinstaller --noconfirm --clean --log-level WARN TarBitTorrent.spec
+        shell: cmd
+        run: build.cmd
 
       - name: Релиз
         uses: softprops/action-gh-release@v2

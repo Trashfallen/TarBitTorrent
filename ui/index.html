@@ -40,6 +40,7 @@
       <div id="filters"></div>
       <h4>Сеть</h4>
       <div class="net" id="net"></div>
+      <div class="filter speed-btn" id="btnSpeed"></div>
     </aside>
 
     <main>
@@ -152,6 +153,39 @@
     <header><h3 id="textTitle"></h3><button class="btn icon ghost" data-close></button></header>
     <div class="content"><div id="textBody" class="sel-text" style="white-space:pre-wrap"></div></div>
     <footer><button class="btn primary" data-close>Закрыть</button></footer>
+  </div>
+</div>
+
+<!-- Скорость интернета -->
+<div class="overlay" id="speedOverlay">
+  <div class="modal wide">
+    <header><h3>Скорость интернета</h3><button class="btn icon ghost" data-close></button></header>
+    <div class="content speed">
+      <div class="speed-main">
+        <svg class="gauge" id="gauge" viewBox="0 0 300 260"></svg>
+        <div class="speed-side">
+          <div class="speed-cards">
+            <div class="scard"><span>Пинг</span><b id="spPing">-</b><i>мс</i><small id="spJitter"></small></div>
+            <div class="scard dl"><span>Загрузка</span><b id="spDown">-</b><i>Мбит/с</i></div>
+            <div class="scard ul"><span>Отдача</span><b id="spUp">-</b><i>Мбит/с</i></div>
+          </div>
+          <div class="speed-server" id="spServer"></div>
+          <div class="row-inline" style="margin-top:14px">
+            <button class="btn primary" id="spGo"></button>
+            <label class="check" style="margin-left:6px"><input type="checkbox" id="spThrottle" checked> Притормозить раздачи на время замера</label>
+          </div>
+          <div class="speed-other">
+            <span class="muted">Другие измерители:</span>
+            <button class="btn" id="spYandex">Яндекс Интернетометр</button>
+            <button class="btn" id="spOokla">Speedtest.net</button>
+          </div>
+        </div>
+      </div>
+      <h4 style="margin:18px 0 8px">История</h4>
+      <div class="files-box"><table><colgroup><col style="width:150px"><col style="width:90px"><col style="width:120px"><col style="width:120px"><col></colgroup>
+        <thead><tr><th>Когда</th><th class="num">Пинг</th><th class="num">Загрузка</th><th class="num">Отдача</th><th>Сервер</th></tr></thead>
+        <tbody id="spHistory"></tbody></table></div>
+    </div>
   </div>
 </div>
 

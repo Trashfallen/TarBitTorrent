@@ -178,6 +178,7 @@ function applyTheme() {
   store.set("theme", t);
   if (t === "system") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   document.documentElement.dataset.theme = t;
+  if (window.tbtTheme) window.tbtTheme(t);   // темный заголовок окна Windows
   const cur = S.settings.theme || "dark";
   $("btnTheme").innerHTML = ico(cur === "light" ? "sun" : cur === "system" ? "monitor" : "moon");
 }
@@ -360,7 +361,11 @@ function renderFooter() {
   const parts = [];
   if (s.dl > 0) parts.push("↓ " + fmtSpeed(s.dl));
   if (s.ul > 0) parts.push("↑ " + fmtSpeed(s.ul));
-  document.title = active ? `${parts.join(" ")} - TarBitTorrent` : "TarBitTorrent";
+  const title = active ? `${parts.join(" ")} - TarBitTorrent` : "TarBitTorrent";
+  if (document.title !== title) {
+    document.title = title;
+    if (window.tbtTitle) window.tbtTitle(title);
+  }
   $("btnAlt").classList.toggle("on", !!S.settings.alt_enabled);
 }
 
@@ -643,7 +648,7 @@ function drawPieces(cv, map, progress) {
   });
 }
 
-const PRIO = [[0, "Не качать"], [1, "Низкий"], [4, "Обычный"], [7, "Высокий"]];
+const PRIO = [[0, "Не качать"], [4, "Обычный"], [7, "Высокий"]];
 function renderFiles(pane, id, files, force) {
   if (!files.length) {
     pane.innerHTML = `<div class="muted">Список файлов появится, когда будут получены данные о раздаче.</div>`;
@@ -817,7 +822,10 @@ async function addFiles(files) {
 
 function afterAdd(r) {
   if (!r) return;
-  if (r.added) toast(r.added.duplicate ? `Уже есть: ${r.added.name}` : `Добавлено: ${r.added.name}`, "ok");
+  if (r.added && r.added.duplicate) {
+    toast(`Уже есть: ${r.added.name}. Новые трекеры из ссылки добавлены. Перепроверить файлы: правый клик по раздаче, «Проверить файлы»`, "info", 7000);
+    setSelection([r.added.id], r.added.id);
+  } else if (r.added) toast(`Добавлено: ${r.added.name}`, "ok");
   if (r.pending) { S.pending.push(r.pending); showPending(); }
 }
 
@@ -971,6 +979,8 @@ function renderSettings(active) {
     ${sw("start_paused", "Добавлять на паузе", "", s.start_paused)}
     ${sw("sequential_default", "Качать по порядку", "Удобно для видео: можно смотреть, не дожидаясь конца", s.sequential_default)}
     ${sw("notify_finished", "Уведомлять о завершении", "Всплывающее уведомление Windows", s.notify_finished)}
+    <h4>Окно</h4>
+    ${sw("close_to_tray", "Крестик сворачивает в трей", "Раздачи продолжают качаться; выход - через значок в трее", s.close_to_tray)}
     <h4>Оформление</h4>
     <div class="toggle"><div class="t"><b>Тема</b></div>
       <div class="seg" id="setTheme">${[["dark", "Темная", "moon"], ["light", "Светлая", "sun"], ["system", "Как в Windows", "monitor"]]
@@ -1004,8 +1014,9 @@ function renderSettings(active) {
       <div class="row-inline"><input class="input num-input" type="number" min="1024" max="65535" data-key="listen_port" value="${s.listen_port}">
       <button class="btn" id="setRandPort" title="Случайный порт">${ico("refresh")}</button></div></div>
     ${sel("encryption", "Шифрование", "Помогает, если провайдер режет торренты", s.encryption, [["prefer", "Разрешено"], ["require", "Обязательно"], ["off", "Выключено"]])}
-    ${num("max_connections", "Максимум соединений", "", s.max_connections, "")}
-    ${sel("identity", "Представляться трекерам как", "Некоторые трекеры пускают только известные клиенты", s.identity, [["native", "TarBitTorrent (libtorrent)"], ["qbittorrent", "qBittorrent 5"]])}
+    ${num("max_connections", "Соединений на раздачу", "", s.max_connections, "")}
+    <div class="muted" style="margin-top:8px">Порт, шифрование, DHT, PEX, UPnP и «представляться как» применяются сразу: раздачи на пару секунд переподключатся.</div>
+    ${sel("identity", "Представляться трекерам как", "Некоторые трекеры пускают только известные клиенты", s.identity, [["native", "TarBitTorrent"], ["qbittorrent", "qBittorrent 5"]])}
   </section>
   <section data-s="windows">
     <h4>Запуск</h4>
@@ -1020,7 +1031,7 @@ function renderSettings(active) {
     <div style="display:flex;gap:16px;align-items:center;margin:14px 0">
       <img src="icon-128.png" alt="" style="width:72px">
       <div><div style="font-size:20px;font-weight:700">TarBit<span style="background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent">Torrent</span></div>
-      <div class="muted">Версия ${esc(S.version)} · движок libtorrent</div></div></div>
+      <div class="muted">Версия ${esc(S.version)} · движок anacrolix/torrent</div></div></div>
     <h4>Обновления</h4>
     ${sw("check_updates", "Проверять обновления автоматически", "При запуске и каждые 6 часов, с GitHub", s.check_updates)}
     <div class="toggle"><div class="t"><b>${u.available ? "Доступна версия " + esc(u.version) : esc(u.message || u.error || "Еще не проверялось")}</b>
@@ -1138,7 +1149,95 @@ function renderBanner() {
   $("bannerInstall").title = u.can_install ? "" : "Обновление работает в собранной программе";
 }
 
+// ---------- скорость интернета ----------
+
+const GAUGE_MARKS = [0, 5, 10, 25, 50, 100, 250, 500, 1000];
+const G = { cx: 150, cy: 150, r: 118, from: 135, sweep: 270 };
+const polar = (deg, r = G.r) => [G.cx + r * Math.cos(deg * Math.PI / 180), G.cy + r * Math.sin(deg * Math.PI / 180)];
+function gaugeFrac(v) {
+  const m = GAUGE_MARKS;
+  if (v <= 0) return 0;
+  for (let i = 0; i < m.length - 1; i++) {
+    if (v < m[i + 1]) return (i + (v - m[i]) / (m[i + 1] - m[i])) / (m.length - 1);
+  }
+  return 1;
+}
+const SP_PHASE = { servers: "Ищу ближайший сервер", ping: "Измеряю пинг", download: "Загрузка", upload: "Отдача",
+  done: "Готово", error: "Ошибка", stopped: "Остановлено", "": "Нажмите «Начать замер»" };
+
+function buildGauge() {
+  const [x1, y1] = polar(G.from), [x2, y2] = polar(G.from + G.sweep);
+  const arc = `M ${x1} ${y1} A ${G.r} ${G.r} 0 1 1 ${x2} ${y2}`;
+  const marks = GAUGE_MARKS.map((m, i) => {
+    const [x, y] = polar(G.from + G.sweep * i / (GAUGE_MARKS.length - 1), G.r - 26);
+    return `<text class="mark" x="${x}" y="${y + 4}">${m}</text>`;
+  }).join("");
+  $("gauge").innerHTML = `<defs><linearGradient id="gGrad" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#00d6ff"/><stop offset="1" stop-color="#8a3ffc"/></linearGradient></defs>
+    <path class="track" d="${arc}" fill="none" stroke-width="16" stroke-linecap="round"/>
+    <path class="val" id="gVal" d="${arc}" fill="none" stroke="url(#gGrad)" stroke-width="16" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
+    ${marks}
+    <text class="num" id="gNum" x="150" y="160">0</text>
+    <text class="unit" x="150" y="182">Мбит/с</text>
+    <text class="phase" id="gPhase" x="150" y="236"></text>`;
+}
+
+let speedTimer = null;
+function openSpeed() {
+  if (!$("gauge").firstChild) buildGauge();
+  openOverlay("speedOverlay");
+  pollSpeed();
+}
+async function pollSpeed() {
+  clearTimeout(speedTimer);
+  if (!$("speedOverlay").classList.contains("show")) return;
+  try { renderSpeedTest(await api("speedtest")); } catch (e) { /* следующий опрос */ }
+  speedTimer = setTimeout(pollSpeed, 250);
+}
+const fmtMbps = (v) => (v > 0 ? (v < 10 ? v.toFixed(2) : v < 100 ? v.toFixed(1) : v.toFixed(0)) : "-");
+function renderSpeedTest(st) {
+  const c = st.current || {};
+  const shown = st.running ? st.live : (st.phase === "done" ? c.down : 0);
+  const frac = gaugeFrac(shown || 0);
+  $("gVal").setAttribute("stroke-dasharray", `${(frac * 100).toFixed(2)} 100`);
+  $("gNum").textContent = shown > 0 ? fmtMbps(shown) : "0";
+  $("gPhase").textContent = st.phase === "error" ? (st.error || "Ошибка") : (SP_PHASE[st.phase] || "");
+  $("spPing").textContent = c.ping > 0 ? c.ping.toFixed(0) : "-";
+  $("spJitter").textContent = c.jitter > 0 ? `джиттер ${c.jitter.toFixed(1)} мс` : "";
+  $("spDown").textContent = fmtMbps(c.down);
+  $("spUp").textContent = fmtMbps(c.up);
+  $("spServer").innerHTML = [c.sponsor ? `Сервер: <b>${esc(c.sponsor)}</b> (${esc(c.server)})` : "", c.isp ? `Провайдер: ${esc(c.isp)}` : ""]
+    .filter(Boolean).join(" · ");
+  $("spGo").innerHTML = st.running ? ico("x") + "Остановить" : ico("zap") + (st.phase === "done" ? "Замерить еще раз" : "Начать замер");
+  $("spGo").dataset.running = st.running ? "1" : "";
+  $("spHistory").innerHTML = (st.history || []).slice().reverse().map((h) => `<tr><td>${fmtDate(h.time)}</td>
+    <td class="num">${h.ping.toFixed(0)} мс</td><td class="num">${fmtMbps(h.down)} Мбит/с</td><td class="num">${fmtMbps(h.up)} Мбит/с</td>
+    <td title="${esc(h.sponsor)}">${esc(h.sponsor)}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">Замеров пока не было</td></tr>`;
+}
+$("btnSpeed").innerHTML = ico("zap") + "<span>Скорость интернета</span>";
+$("btnSpeed").onclick = openSpeed;
+$("spGo").onclick = async () => {
+  if ($("spGo").dataset.running) await run(() => api("speedtest/stop", {}));
+  else await run(() => api("speedtest/start", { throttle: $("spThrottle").checked }));
+  pollSpeed();
+};
+$("spYandex").onclick = () => run(() => api("webwindow", { site: "yandex" }));
+$("spOokla").onclick = () => run(() => api("webwindow", { site: "speedtest" }));
+
 // ---------- клавиатура ----------
+
+// это приложение, а не страница: без меню браузера, обновления и печати
+document.addEventListener("contextmenu", (e) => {
+  if (!e.target.closest("input, textarea, .sel-text")) e.preventDefault();
+});
+document.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (e.key === "F5" || e.key === "F12" || e.key === "F3" || e.key === "F7" ||
+      (e.ctrlKey && ["r", "p", "s", "u", "g", "j", "h", "n", "t", "w"].includes(k)) ||
+      (e.ctrlKey && e.shiftKey && ["i", "c", "j"].includes(k)) || (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight"))) {
+    e.preventDefault();
+  }
+}, true);
 
 document.addEventListener("keydown", (e) => {
   const inField = e.target.closest("input, textarea, select");
