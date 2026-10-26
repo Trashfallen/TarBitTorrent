@@ -6,6 +6,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Paths struct {
@@ -52,6 +53,15 @@ func defaultDownloads() string {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+// within - p лежит внутри base и не совпадает с ней.
+func within(base, p string) bool {
+	rel, err := filepath.Rel(base, p)
+	if err != nil || rel == "." || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func exePath() string {

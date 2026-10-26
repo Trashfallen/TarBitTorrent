@@ -245,11 +245,19 @@ func (e *Engine) itemStorage(it *Item) storage.ClientImpl {
 }
 
 // relFilePath - путь файла внутри раздачи, без ее корневой папки.
+// Части пути из торрента проходят safeName: ".." и разделители внутри имен
+// не выводят файл за папку раздачи.
 func relFilePath(info *metainfo.Info, f *metainfo.FileInfo) string {
-	if p := f.BestPath(); len(p) > 0 {
-		return filepath.Join(p...)
+	var parts []string
+	for _, s := range f.BestPath() {
+		if s != "" && s != "." {
+			parts = append(parts, safeName(s))
+		}
 	}
-	return info.BestName() // раздача из одного файла
+	if len(parts) == 0 {
+		return safeName(info.BestName()) // раздача из одного файла
+	}
+	return filepath.Join(parts...)
 }
 
 func folderFor(folder *string, info *metainfo.Info) string {
@@ -257,22 +265,36 @@ func folderFor(folder *string, info *metainfo.Info) string {
 		return *folder
 	}
 	if info != nil && info.IsDir() {
-		return info.BestName()
+		return sanitizeFolder(info.BestName())
 	}
 	return ""
 }
 
-// sanitizeFolder убирает из имени папки то, что Windows не разрешает.
-func sanitizeFolder(name string) string {
-	name = strings.Map(func(r rune) rune {
+// replaceBadRunes заменяет символы, которые Windows не разрешает в именах, и разделители.
+func replaceBadRunes(name string) string {
+	return strings.Map(func(r rune) rune {
 		if r < 32 || strings.ContainsRune(`<>:"/\|?*`, r) {
 			return '_'
 		}
 		return r
 	}, name)
-	name = strings.TrimRight(strings.TrimSpace(name), ". ")
+}
+
+// sanitizeFolder убирает из имени папки то, что Windows не разрешает.
+func sanitizeFolder(name string) string {
+	name = strings.TrimRight(strings.TrimSpace(replaceBadRunes(name)), ". ")
 	if name == "." || name == ".." {
 		return ""
+	}
+	return name
+}
+
+// safeName - имя файла или папки из торрента: без запрещенных символов и
+// разделителей, не пустое; "." и ".." становятся "_".
+func safeName(name string) string {
+	name = strings.TrimRight(replaceBadRunes(name), ". ")
+	if name == "" {
+		return "_"
 	}
 	return name
 }
@@ -934,7 +956,7 @@ func (e *Engine) rootPath(it *Item) string {
 		return filepath.Join(it.SavePath, f)
 	}
 	if !info.IsDir() {
-		return filepath.Join(it.SavePath, info.BestName())
+		return filepath.Join(it.SavePath, safeName(info.BestName()))
 	}
 	return ""
 }
@@ -987,10 +1009,18 @@ func (e *Engine) remove(id string, withData bool) error {
 	if withData && root == "" {
 		// раздача без своей папки: удаляем только ее файлы
 		for _, f := range files {
+			if !within(it.SavePath, f) {
+				logf("Пропущен файл вне папки загрузок: %s", f)
+				continue
+			}
 			_ = os.Remove(f)
 			_ = os.Remove(f + ".part")
 			removeEmptyDirs(filepath.Dir(f), it.SavePath)
 		}
+	}
+	if withData && root != "" && !within(it.SavePath, root) {
+		logf("Не удаляю %s: вне папки загрузок %s", root, it.SavePath)
+		root = ""
 	}
 	if withData && root != "" {
 		// файлы могут быть еще открыты движком: даем ему секунду
@@ -1030,6 +1060,8 @@ func (e *Engine) move(it *Item, dest string) error {
 		time.Sleep(time.Second) // движок закрывает файлы
 		switch {
 		case err != nil:
+		case root != "" && !within(src, root):
+			err = fmt.Errorf("%s вне папки загрузок", root)
 		case root != "" && fileExists(root):
 			err = moveTree(root, filepath.Join(dest, filepath.Base(root)))
 		case root != "":
@@ -1039,7 +1071,7 @@ func (e *Engine) move(it *Item, dest string) error {
 		default:
 			for _, f := range files {
 				rel, rerr := filepath.Rel(src, f)
-				if rerr != nil {
+				if rerr != nil || !within(src, f) {
 					continue
 				}
 				for _, p := range []string{f, f + ".part"} {
