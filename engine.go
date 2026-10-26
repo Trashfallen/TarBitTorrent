@@ -21,10 +21,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -302,8 +304,10 @@ func safeName(name string) string {
 // restart пересоздает движок после смены порта, шифрования и т.п.
 func (e *Engine) restart() {
 	e.mu.Lock()
+	var stops []func()
 	for _, it := range e.items {
 		if it.t != nil {
+			stops = append(stops, e.takeVerifyLocked(it))
 			e.deactivateLocked(it, false)
 		}
 	}
@@ -314,7 +318,8 @@ func (e *Engine) restart() {
 	for _, d := range dhts {
 		d.s.Close()
 	}
-	cl.Close()
+	stopAll(stops) // Close посреди проверки файлов может заблокировать движок
+	closeClient(cl)
 	if err := e.startClient(); err != nil {
 		logf("Перезапуск движка: %v", err)
 	}
@@ -1450,7 +1455,11 @@ func (e *Engine) saveState() {
 	e.mu.Lock()
 	s := stateFile{}
 	for _, it := range e.items {
+		// карта и срезы общие с it: маршалим копию уже без замка
 		cp := *it
+		cp.Prio = maps.Clone(it.Prio)
+		cp.Peers = slices.Clone(it.Peers)
+		cp.UserTrackers = slices.Clone(it.UserTrackers)
 		if it.t != nil {
 			st := it.t.Stats()
 			cp.Uploaded += st.BytesWrittenData.Int64()
@@ -1479,9 +1488,11 @@ func (e *Engine) Shutdown() {
 	<-e.done
 	e.saveState()
 	e.mu.Lock()
+	var stops []func()
 	for _, it := range e.items {
 		if it.t != nil {
 			e.announceStoppedLocked(it)
+			stops = append(stops, e.takeVerifyLocked(it))
 		}
 	}
 	dhts := e.dhts
@@ -1492,9 +1503,37 @@ func (e *Engine) Shutdown() {
 	if e.lsd != nil {
 		e.lsd.Close()
 	}
-	cl.Close()
-	_ = e.pc.Close()
+	stopAll(stops)
+	if closeClient(cl) {
+		_ = e.pc.Close()
+	}
 	logf("Движок остановлен")
+}
+
+// stopAll отменяет проверки файлов параллельно и ждет их (каждую не дольше 10 с).
+func stopAll(stops []func()) {
+	var wg sync.WaitGroup
+	for _, stop := range stops {
+		wg.Go(stop)
+	}
+	wg.Wait()
+}
+
+// closeClient закрывает движок, но не дольше 10 с: зависший Close не должен
+// держать процесс и мьютекс единственного экземпляра.
+func closeClient(cl *torrent.Client) bool {
+	closed := make(chan struct{})
+	go func() {
+		cl.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		return true
+	case <-time.After(10 * time.Second):
+		logf("Движок не закрылся за 10 с")
+		return false
+	}
 }
 
 // moveTree переносит файл или папку; между дисками - копированием.
